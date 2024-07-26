@@ -1,0 +1,38 @@
+title: LDAP Discovery
+id: 6201a344-b93d-4c03-93d2-7d00f97dbd6c
+status: test
+description: |
+  This query is designed to hunt for common LDAP discovery tools such as Pingcastle or Sharphound
+references:
+  - https://www.secureworks.com/blog/sniffing-out-sharphound-on-its-hunt-for-domain-admin
+  - https://github.com/vadim-hunter/Detection-Ideas-Rules/blob/main/Tools/BloodHound.yaml
+author:
+  - Linus
+date: 2024/07/25
+modified: 2024/07/25
+tags:
+  - attack.discovery
+  - attack.t1482
+  - attack.t1087
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: high
+  kusto: |
+    let filter1 = dynamic(["objectCategory=organizationalUnit","objectCategory=container","objectCategory=domain","objectCategory=buitinDomain"]); // Pingcastle
+    let filter2 = dynamic(["objectClass=user","objectCategory=person","objectcategory=msDS-GroupManagedServiceAccount","objectcategory=msDS-ManagedServiceAccount"]); // Pingcastle
+    let filter3 = dynamic(["objectClass=container","objectClass=organizationalunit"]); // Pingcastle
+    IdentityQueryEvents
+    | where Timestamp > ago(30d)
+    | extend search_filter = tostring(parse_json(AdditionalFields["SearchFilter"]))
+    | where isnotempty(search_filter)
+    | where search_filter has_all (filter1)
+            or search_filter has_all (filter2)
+            or search_filter has_all (filter3)
+            or search_filter contains "ObjectCategory=trustedDomain" // This one might be a bit too broad
+    | summarize count=count(), search_filters = make_set(search_filter) by DeviceName
+    | extend search_filter_unique_count = array_length(search_filters)
+    | order by search_filter_unique_count desc
+falsepositives:
+  - None expected
+level: medium

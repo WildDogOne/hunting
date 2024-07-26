@@ -1,0 +1,44 @@
+title: DHCP Spoofing NS
+id: 5098cb8a-46f2-4c99-ad12-b1bb4ec29df7
+status: test
+description: |
+  Attackers can perform a DHCP spoofing attack to redirect traffic to a malicious server.
+  This policy tries to detect a rogue DHCP by checking for infrequent Nameserver Configurations
+references:
+  - https://github.com/Sergio-Albea-Git/-Defender-XDR-/blob/main/KQL%20Queries/Network%20Threats/non-familiar%20DHCPDomains%20configured%20in%20our%20devices.md
+author:
+  - Linus
+date: 2024/07/05
+modified: 2024/07/15
+tags:
+  - attack.credential_access
+  - attack.t1557.003
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: low
+  kusto: |
+    let timeframe = 1d;
+    let known_nameserver =
+    DeviceRegistryEvents
+    | where Timestamp between (ago(30d) .. ago(timeframe))
+    | where RegistryValueName == "DhcpNameServer"
+    | mv-expand nameserver = split(RegistryValueData, " ")
+    | extend nameserver = tostring(nameserver)
+    | summarize nameservers = make_set(nameserver);
+    let not_company_domain = DeviceRegistryEvents // This is used to exclude Devices that have a non company DHCP Domain, which automatically means it is not a spoofing attack +/-
+    | where Timestamp between (ago(timeframe) .. now())
+    | where RegistryValueName == "DhcpDomain"
+    | where RegistryValueData endswith "{{domain}}" // Replace with your domain(s)
+    | summarize by DeviceName, Domain=RegistryValueData;
+    DeviceRegistryEvents
+    | where Timestamp between (ago(timeframe) .. now())
+    | where RegistryValueName == "DhcpNameServer"
+    | mv-expand nameserver = split(RegistryValueData, " ")
+    | extend nameserver = tostring(nameserver)
+    | where not(nameserver in~ (known_nameserver))
+    | join kind=inner not_company_domain on DeviceName
+    | summarize count = count(), Nameservers = make_set(nameserver) by DeviceName, Domain
+falsepositives:
+  - There are some applications that perform these actions for legitimate purposes, one example is Procmon by Sysinternals.
+level: medium

@@ -1,0 +1,33 @@
+title: Component Object Model Hijacking - Vault7 trick
+id: 8b4c845c-0d99-4ca2-837c-1394fd1ae6ea
+status: test
+description: |
+  Look for the very specific value of "Attribute" in the "ShellFolder" CLSID of a COM object. This value (0xf090013d) seems to only link back to this specific persistence method.
+  The blog post linked above provides more background on the meaning of this value.
+references:
+  - https://github.com/FalconForceTeam/FalconFriday/blob/master/Persistence/T1546.015-WIN-001.md
+  - https://vanmieghem.io/persisting-like-a-cia-agent/
+  - https://wikileaks.org/ciav7p1/cms/page_13763373.html
+author:
+  - FalconForce
+date: 2024/07/05
+modified: 2024/07/05
+tags:
+  - attack.persistence
+  - attack.t1546.015
+  - falcon.T1546.015-WIN-001
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: low
+  kusto: |
+    DeviceRegistryEvents
+    | where RegistryKey contains "ShellFolder"  and ActionType == "RegistryValueSet" and RegistryValueName =~ "Attributes" 
+    //toint automatically converts base10 and base16 strings to int toint("0xFF") == toint("255") == int(0xFF) ==  int(255)
+    //here we need to use long type as int in KQL is a 32-bit signed integer
+    // We're using >= to make sure that if someone adds an additional flag to this field, it doesn't bypass this hunt.
+    // removing any flag will bypass this hunt, but more research is needed to understand which of the flag values are relevant
+    | where tolong(RegistryValueData) >= long(0xf090013d) 
+  falsepositives:
+  - N/A
+level: medium

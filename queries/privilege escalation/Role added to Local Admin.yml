@@ -1,0 +1,26 @@
+title: Role added to Local Admin
+id: 68110c46-97b1-4df6-9b7a-5b11d1621354
+status: test
+description: |
+  Admins that are Synced from Onprem should never have Privileged roles in EntraID.
+  Only @onmicrosoft accounts should have Privileged roles.
+author:
+  - Linus
+date: 2024/07/05
+modified: 2024/07/05
+tags:
+  - attack.privilegeescalation
+  - attack.t1098.001 
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: low
+  kusto: |
+    IdentityInfo
+    | where array_length(AssignedRoles) > 0
+    | where not(AccountUpn endswith ".onmicrosoft.com")
+    | order by Timestamp desc 
+    | summarize  AssignedRoles=make_set(AssignedRoles), count=count() by AccountUpn, AccountDisplayName
+falsepositives:
+  - Maybe Service Accounts? But they too should not have Privileged roles.
+level: medium

@@ -1,0 +1,48 @@
+title: PowerShell - System.Management.Automation
+id: 10a453ae-1832-44e1-b4b1-71c53509f613
+status: test
+description: |
+  The rule identifies all processes that load the System.Management.Automation.dll and excludes some known processes that do so (like PS).
+  There is an automatic whitelisting for applications with huge global prelevancce, this can be adjusted to your needs.
+references:
+  - https://github.com/FalconForceTeam/FalconFriday/blob/master/Execution/T1059.001-WIN-001.md
+author:
+  - FalconForce
+  - Linus
+date: 06.06.2024
+modified: 06.06.2024
+tags:
+  - attack.execution
+  - attack.defenseevasion
+  - attack.t1059.001
+  - attack.t1218.011 
+  - attack.t1127.001
+  - attack.t1036
+  - falcon.T1059.001-WIN-001
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: low
+  kusto: |
+    DeviceImageLoadEvents
+    | where Timestamp > ago(30d)
+    | where FileName =~ "System.Management.Automation.dll" or FileName =~ "System.Management.Automation.ni.dll"
+    | where not(InitiatingProcessFolderPath startswith "C:\\Windows\\System32\\WindowsPowerShell\\v1.0") and (InitiatingProcessFileName !~ "powershell.exe" or InitiatingProcessFileName !~ "powershell_ise.exe")
+    | where not(InitiatingProcessFolderPath startswith "C:\\Windows\\SysWOW64\\WindowsPowerShell\\v1.0") and (InitiatingProcessFileName !~ "powershell.exe" or InitiatingProcessFileName !~ "powershell_ise.exe")
+    // The RemoteFXvGPUDisablement.exe is for GPU virtualization, MS recommends to remove this service as of July 2020. 
+    | where InitiatingProcessFolderPath !~ "C:\\Windows\\system32" and InitiatingProcessFileName !~ "RemoteFXvGPUDisablement.exe"
+    // exclusions below can be enabled if you're using visual studio 
+    | where not(InitiatingProcessFolderPath startswith "C:\\Windows\\Microsoft.NET\\Framework") and InitiatingProcessFileName !~ "devenv.exe"
+    | where not(InitiatingProcessFolderPath startswith "\\Microsoft Visual Studio\\2019\\Community\\Common7\\ServiceHub\\Hosts\\ServiceHub.Host.CLR.x86") and InitiatingProcessFileName !startswith "servicehub"
+    | where not(InitiatingProcessFolderPath startswith "\\Microsoft Visual Studio\\2019\\Community\\Common7\\IDE") and InitiatingProcessFileName !~ "mscorsvw.exe" and InitiatingProcessParentFileName !~ "ngen.exe"
+    | project Timestamp,DeviceName,InitiatingProcessAccountName,ActionType,InitiatingProcessFileName,InitiatingProcessFolderPath,InitiatingProcessCommandLine,InitiatingProcessIntegrityLevel,FileName,InitiatingProcessParentId,InitiatingProcessId, SHA1
+    | invoke FileProfile(SHA1, 1000)
+    | summarize count=count() by DeviceName,InitiatingProcessAccountName,ActionType,InitiatingProcessFileName,InitiatingProcessFolderPath,InitiatingProcessCommandLine,InitiatingProcessIntegrityLevel,FileName, SHA1, GlobalPrevalence,GlobalFirstSeen,GlobalLastSeen,IsCertificateValid,SignatureState
+    // This whitelisting is a bit risky, remove for more but also nosier results
+    // Alternative would be to increase/decrease threshold
+    //| where not (GlobalPrevalence >= 500 and IsCertificateValid)
+    | where GlobalPrevalence < 1000
+    | order by GlobalPrevalence asc
+falsepositives:
+  - Legitimate processes that use this dll, obviousl example would be powershell.exe
+level: medium

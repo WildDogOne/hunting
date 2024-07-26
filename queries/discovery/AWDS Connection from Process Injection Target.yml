@@ -1,0 +1,64 @@
+title: AWDS Connection from Process Injection Target
+id: f5745d62-13ad-4055-b4e5-b2d223dc60f9
+status: test
+description: |
+  ADWS is a Windows service that allows Active Directory to be queried via a web service. While this service is not malicious by itself, it can be used by attackers to query Active Directory from compromised machines.
+  An attacker might inject code into a legitimate process and use that process to connect to ADWS.
+references:
+  - https://github.com/FalconForceTeam/FalconFriday/blob/master/Discovery/ADWS_Connection_from_Process_Injection_Target-Win.md
+author:
+  - FalconForce
+date: 06.06.2024
+modified: 06.06.2024
+tags:
+  - attack.collection
+  - attack.discovery
+  - attack.defense_evasion
+  - attack.t1119
+  - attack.t1087
+  - attack.t1055
+  - falcon.ADWS_Connection_from_Process_Injection_Target-Win
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: low
+  kusto: |
+    let timeframe = 30d;
+    let ADWSConnections=(
+        DeviceNetworkEvents
+        | where Timestamp >= ago(timeframe)
+        | where ActionType == "ConnectionSuccess"
+        | where RemotePort == 9389
+        | extend InitiatingProcessFileName=tolower(InitiatingProcessFileName)
+    );
+    let ADWSFileNames=materialize(
+        ADWSConnections
+        | distinct InitiatingProcessFileName
+    );
+    // Look for processes that inject into a process that makes an ADWS connection.
+    let InjectorProcesses=materialize(
+        DeviceEvents
+        | where Timestamp >= ago(timeframe)
+        | where not(isempty(FileName))
+        // Look for actions associated with process injection.
+        | where ActionType in~ ("CreateRemoteThreadApiCall", "MemoryRemoteProtect","NtAllocateVirtualMemoryApiCall", "NtAllocateVirtualMemoryRemoteApiCall", "NtMapViewOfSectionRemoteApiCall", "NtProtectVirtualMemoryApiCall", "SetThreadContextRemoteApiCall", "QueueUserApcRemoteApiCall")
+        | where FileName in~ (ADWSFileNames)
+        | where not(InitiatingProcessFolderPath startswith @"c:\program files\vmware\vmware tools" and InitiatingProcessFileName =~ "vmtoolsd.exe")
+        | where not(InitiatingProcessFolderPath =~ @"C:\Windows\System32" and InitiatingProcessFileName =~ "csrss.exe")
+        | where not(InitiatingProcessFolderPath =~ @"C:\Windows\System32\csrss.exe")
+        | where not(InitiatingProcessFolderPath startswith @"c:\program files\microsoft azure ad sync\" and InitiatingProcessFileName =~ "miiserver.exe")
+        | extend FileName=tolower(FileName)
+        | lookup kind=inner ADWSConnections on DeviceId, $left.ProcessId == $right.InitiatingProcessId, $left.FileName == $right.InitiatingProcessFileName
+        // Begin environment-specific filter.
+        // End environment-specific filter.
+        | project DeviceId, ProcessId, FileName, InjectorProcessId=InitiatingProcessId, InjectorFileName=InitiatingProcessFileName, InjectorActionType=ActionType
+    );
+    // Find ADWS connections from processes that were injected into by another process.
+    ADWSConnections
+    | lookup kind=inner InjectorProcesses on DeviceId, $left.InitiatingProcessId == $right.ProcessId, $left.InitiatingProcessFileName == $right.FileName
+    | summarize arg_min(Timestamp,*), InjectionMethods=make_set(InjectorActionType) by DeviceId, DeviceName, InitiatingProcessId, InitiatingProcessFileName
+    // Begin environment-specific filter.
+    // End environment-specific filter.
+falsepositives:
+  - None expected
+level: medium

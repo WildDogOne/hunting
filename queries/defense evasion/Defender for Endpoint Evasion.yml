@@ -1,0 +1,29 @@
+title: Defender for Endpoint Evasion
+id: 57f386aa-1567-44da-bbe1-845097106ba1
+status: test
+description: |
+  This rule identifies processes that look for MDE configuration
+references:
+  - https://medium.com/codex/my-learnings-on-microsoft-defender-for-endpoint-and-exclusions-ddacf2fdd047
+author:
+  - Linus
+date: 2024/06/23
+modified: 2024/07/15
+tags:
+  - attack.defense_evasion
+  - attack.t1562.001
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: low
+  kusto: |
+    DeviceProcessEvents
+    | where Timestamp > ago(30d)
+    | where ProcessCommandLine contains "Get-MpPreference"
+    | summarize count() by ProcessCommandLine, FileName, InitiatingProcessFileName, InitiatingProcessSHA1, InitiatingProcessParentFileName
+    | invoke FileProfile(InitiatingProcessSHA1, 1000)
+    | where GlobalPrevalence < 1000
+    | where Signer != "JetBrains s.r.o."
+falsepositives:
+  - Legitimate processes that need to check the MDE configuration, seems Pycharm is one of them...
+level: medium

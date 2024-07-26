@@ -1,0 +1,36 @@
+title: DNS Autoconfig Spoofing
+id: ec16e4b2-94c6-40c9-85e3-6f1bfa85ee3d
+status: test
+description: |
+  Windows has many automatic configuration features such as wpad for proxy discovery.
+  This query detects DNS request to popular autoconfig subdomains and tracks if there have been unusual answers.
+  Commonly used subdomains start with wpad or _
+author:
+  - Linus
+date: 2024/07/15
+modified: 2024/07/17
+tags:
+  - attack.credential_access
+  - attack.t1557.001
+  - attack.t1557
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: low
+  kusto: |
+    DeviceEvents
+    | where Timestamp > ago(30d)
+    | where ActionType == "DnsQueryResponse"
+    | extend DnsQuery = tostring(parse_json(AdditionalFields)["DnsQueryString"])
+    | where DnsQuery startswith "_" or DnsQuery startswith "wpad." or DnsQuery startswith "ldap." // Add more subdomains here
+    | where not(DnsQuery startswith "_msradc.") // Add Whitelisted Domains here
+    | extend DnsQueryResults = parse_json(parse_json(AdditionalFields)["DnsQueryResult"])
+    | project DnsQuery, DnsQueryResults
+    | where array_length(DnsQueryResults) > 0
+    | where not(parse_json(dynamic_to_json(DnsQueryResults[0]))["Result"] endswith ".{{domain}}") // Add your domain here
+falsepositives:
+  - Applications that use odd DNS Names
+  - DNS Blackholing devices that always return a result, for example for error pages
+level: high
+
+

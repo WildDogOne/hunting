@@ -1,0 +1,51 @@
+title: Inbound Named Pipes
+id: 48afe932-4327-49bf-9d57-171ca9bd6bdc
+status: test
+description: |
+  Detects inbound named pipe events that are associated with lateral movement.
+  Named pipes are a form of inter-process communication that can be used by adversaries to execute code, transfer files, and perform other malicious activities.
+  This query detects named pipe events where the remote client is accepting the connection.
+author:
+  - FalconForce
+date: 2024/07/17
+modified: 2024/07/17
+tags:
+  - attack.lateral_movement
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: medium
+  kusto: |
+      let timeframe = 1d;
+      let known_source_hosts = DeviceEvents
+          | where Timestamp between (ago(30d) .. ago(timeframe))
+          | where ActionType == "NamedPipeEvent"
+          | extend AdditionalFields=parse_json(AdditionalFields)
+          | extend ThreadId=tostring(AdditionalFields.ThreadId)
+          | extend PipeName=tostring(AdditionalFields.PipeName)
+          | extend RemoteClientsAccess=tostring(AdditionalFields.RemoteClientsAccess)
+          | extend NamedPipeEnd=tostring(AdditionalFields.NamedPipeEnd)
+          | extend FileOperation=tostring(AdditionalFields.FileOperation)
+          | where RemoteClientsAccess == "AcceptRemote"
+          | where IsInitiatingProcessRemoteSession == 1
+          | extend InitiatingProcessRemoteSessionDeviceName = tolower(InitiatingProcessRemoteSessionDeviceName)
+          | summarize count=count() by InitiatingProcessRemoteSessionDeviceName;
+      DeviceEvents
+          | where Timestamp >= ago(timeframe)
+          | where ActionType == "NamedPipeEvent"
+          | extend AdditionalFields=parse_json(AdditionalFields)
+          | extend ThreadId=tostring(AdditionalFields.ThreadId)
+          | extend PipeName=tostring(AdditionalFields.PipeName)
+          | extend RemoteClientsAccess=tostring(AdditionalFields.RemoteClientsAccess)
+          | extend NamedPipeEnd=tostring(AdditionalFields.NamedPipeEnd)
+          | extend FileOperation=tostring(AdditionalFields.FileOperation)
+          | where RemoteClientsAccess == "AcceptRemote"
+          | where IsInitiatingProcessRemoteSession == 1
+          | extend InitiatingProcessRemoteSessionDeviceName = tolower(InitiatingProcessRemoteSessionDeviceName)
+          | summarize count=count() by InitiatingProcessRemoteSessionDeviceName, InitiatingProcessRemoteSessionIP
+          | join kind=anti known_source_hosts on InitiatingProcessRemoteSessionDeviceName
+falsepositives:
+  - N/A
+level: medium
+
+

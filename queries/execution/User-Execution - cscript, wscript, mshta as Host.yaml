@@ -1,0 +1,29 @@
+title: User-Execution - cscript, wscript, mshta as Host
+id: ea9d4f93-8b8e-4ac5-a2c9-cfb25e340a7e
+status: test
+description: |
+    Malicious (office) files is an technique where users are tricked to open a file controlled by an attacker, which in turn triggers code execution on the victims system.
+    A well known examples are various forms of office macros which in turn try to run other binaries (like lolbins) or inject code into other processes in order to gain code execution.
+references:
+    - https://github.com/FalconForceTeam/FalconFriday/blob/9cb56ec1a302f2ce9630d27cd8cab5b8688ee259/Execution/T1204-WIN-001.md
+author:
+    - FalconForce
+date: 05.06.2024
+modified: 05.06.2024
+tags:
+    - attack.execution
+    - attack.t1204
+logsource:
+    product: microsoft defender for endpoint
+detection:
+    load: low
+    kusto: |
+        //.NET being loaded from wscript or cscript to run .net code such as cactustorch and sharpshooter
+        // all based on the DotNetToJScript by James Foreshaw documented here https://github.com/tyranid/DotNetToJScript
+        DeviceImageLoadEvents 
+        | where FileName in~ ("mscoree.dll", "mscorlib.dll", "mscorlib.ni.dll") 
+        | where tolower(InitiatingProcessFileName) in ("wscript.exe", "cscript.exe") or tolower(InitiatingProcessFileName) in ("mshta.exe")
+falsepositives:
+    - There are legitimate reasons an office application may call a lolbin. Rundll32.exe for printers and csc.exe for defender tasks come to mind.
+    - Some management & installation scripts use vbs/jscript files for legit purposes.
+level: medium

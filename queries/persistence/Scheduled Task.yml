@@ -1,0 +1,36 @@
+title: Scheduled Task
+id: 1c6878b7-990a-4710-afdc-f4e7c4471514
+status: test
+description: |
+  Scheduled tasks run with svchost parent process and parent process command line arguments "-k netsvcs -p -s Schedule".
+  This detection rule obtains unique hashes of binaries that are running with this parent process.
+  To identify potential malicious binaries only the unsigned binaries with a low global prevalence are retained.
+references:
+  - https://github.com/FalconForceTeam/FalconFriday/blob/master/Persistence/T1053.005-WIN-001.md
+author:
+  - FalconForce
+date: 07.06.2024
+modified: 07.06.2024
+tags:
+  - attack.persistence
+  - attack.t1053.005
+  - falcon.T1021-WIN-002
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: low
+  kusto: |
+    let scheduled_binaries = DeviceProcessEvents
+    | where InitiatingProcessCommandLine == "svchost.exe -k netsvcs -p -s Schedule"
+    | distinct SHA1;
+    let untrusted_binaries = scheduled_binaries
+    | join kind=leftanti (DeviceFileCertificateInfo | summarize max_trusted=max(IsTrusted) by SHA1 | where max_trusted==1) on SHA1;
+    untrusted_binaries
+    | invoke FileProfile(SHA1,1000)
+    | where IsCertificateValid != 1 // Exclude signed binaries
+    | where GlobalPrevalence < 1000
+    | join (DeviceProcessEvents | where InitiatingProcessCommandLine == "svchost.exe -k netsvcs -p -s Schedule") on SHA1
+    | summarize arg_max(Timestamp, *) by SHA1 // Give last execution with all details per SHA1
+  falsepositives:
+  - N/A
+level: medium

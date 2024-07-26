@@ -1,0 +1,33 @@
+title: Remote Desktop Protocol - SharpRDP
+id: e52a7cdf-aa22-4719-9b2e-2835cd8f1bbb
+status: test
+description: |
+  SharpRDP tries to remediate this by allowing attackers to perform remote command execution through RDP without the need to have real-time manual interaction by simulating keystrokes on the target system. This allows an attacker to (asynchronously) run the binary on an already compromised system, which in turn will connect to the target system and execute a set of keystrokes.
+references:
+  - https://github.com/FalconForceTeam/FalconFriday/blob/master/Lateral%20Movement/T1021.001-WIN-001.md
+author:
+  - FalconForce
+date: 07.06.2024
+modified: 07.06.2024
+tags:
+  - attack.lateral_movement
+  - attack.t1021.001
+  - falcon.T1021.001-WIN-001
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: low
+  kusto: |
+    let executions = DeviceProcessEvents
+    | where InitiatingProcessFileName contains "taskmgr" and AccountName != "lapsadmin"
+    // Add the filter to look for stock SharpRDP behavior, however with small tweaks one of the command line examples might occur.
+    //| where not(InitiatingProcessCommandLine has_any ("/1","/2","/3","/4"))
+    | where not(FolderPath =~ @"c:\Windows\system32\WerFault.exe" and ProcessCommandLine contains "-u -p")
+    | where not(FolderPath =~ @"c:\windows\system32\mmc.exe" and ProcessCommandLine contains @"C:\WINDOWS\System32\services.msc")
+    | where not(FolderPath =~ @"c:\windows\system32\resmon.exe");
+    executions
+    | join kind=leftsemi  (DeviceLogonEvents
+    | where LogonType in ('Unlock', 'RemoteInteractive') and not (LogonType == 'Unlock' and RemoteIP == '127.0.0.1') and RemoteIP != "" and ActionType == "LogonSuccess") on DeviceId, LogonId
+  falsepositives:
+  - N/A
+level: medium

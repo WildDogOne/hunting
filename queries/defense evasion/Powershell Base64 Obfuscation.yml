@@ -1,0 +1,54 @@
+title: Powershell Base64 Obfuscation
+id: 8cdfb095-5b8b-45e9-a5bb-8325857d1cd1
+status: test
+description: |
+  This rule detects the use of base64 encoded strings in PowerShell commands, which is a common technique used by attackers to obfuscate their commands.
+  It then checks these strings for suspicious keywords that are often used in malicious scripts.
+references:
+  - https://github.com/elastic/detection-rules/blob/main/hunting/windows/docs/suspicious_base64_encoded_powershell_commands.md
+author:
+  - Linus
+date: 2024/07/13
+modified: 2024/07/13
+tags:
+  - attack.defense_evasion
+  - attack.t1140
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: low
+  kusto: |
+    let keywords = dynamic(["addinutil","appinstaller","aspnet_compiler","at","atbroker","bash","bitsadmin","certoc","certreq","certutil","cmd","cmdkey","cmdl32","cmstp","colorcpl","configsecuritypolicy","conhost","control","csc","cscript","customshellhost","datasvcutil","desktopimgdownldr","devicecredentialdeployment","dfsvc","diantz","diskshadow","dnscmd","esentutl","eventvwr","expand","explorer","extexport","extrac32","findstr","finger","fltmc","forfiles","fsutil","ftp","gpscript","hh","imewdbld","ie4uinit","iediagcmd","ieexec","ilasm","infdefaultinstall","installutil","jsc","ldifde","makecab","mavinject","microsoft.workflow.compiler","mmc","mpcmdrun","msbuild","msconfig","msdt","msedge","mshta","msiexec","netsh","odbcconf","offlinescannershell","onedrivestandaloneupdater","pcalua","pcwrun","pktmon","pnputil","presentationhost","print","printbrm","provlaunch","psr","rasautou","rdrleakdiag","reg","regasm","regedit","regini","register-cimprovider","regsvcs","regsvr32","replace","rpcping","rundll32","runexehelper","runonce","runscripthelper","sc","schtasks","scriptrunner","setres","settingsynchost","ssh","stordiag","syncappvpublishingserver","tar","ttdinject","tttracer","unregmp2","vbc","verclsid","wab","wbadmin","winget","wlrmdr","wmic","workfolders","wscript","wsreset","wuauclt","xwizard","msedge_proxy","msedgewebview2","wt",//lolbins
+                            "unrestricted",
+                            "http",
+                            "webclient",
+                            "download",
+                            "mppreference",
+                            "sockets",
+                            "bxor",
+                            ".replace",
+                            "reflection",
+                            "assembly",
+                            "load",
+                            "bits",
+                            "start-proc",
+                            "iwr",
+                            "frombase64"]);
+    let known_powershell_hashes = DeviceProcessEvents | where Timestamp > ago(30d) | where FileName contains "powershell" | summarize by SHA1;
+    DeviceProcessEvents
+    | where Timestamp > ago(30d)
+    | where SHA1 has_any (known_powershell_hashes)
+    | where InitiatingProcessParentFileName != @"SenseIR.exe" // This is MDE, might as well whitelist it to limit ressource usage
+    | summarize by ProcessCommandLine, FileName, InitiatingProcessFileName, InitiatingProcessParentFileName, DeviceName, AccountName
+    | extend base64_data = extract("([A-Za-z0-9+/]+={1,2}$|[A-Za-z0-9+/]{100,})", 0, ProcessCommandLine)
+    | where isnotempty(base64_data)
+    | extend decoded = base64_decode_tostring(base64_data)
+    | extend decoded = replace_regex(decoded, '[\\0]+', '') //Remove Unicode symbols that for some reason appear after base64 decoding
+    | where tolower(decoded) has_any (keywords)
+falsepositives:
+  - Unknown
+level: medium
+
+
+
+

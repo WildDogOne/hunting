@@ -1,0 +1,34 @@
+title: Sudden Spike in LDAP Queries from Host
+id: 8b6ce5ee-3fb6-4250-b6b1-33d223ab44ab
+status: test
+description: |
+  This policies checks for hosts with sudden spikes in LDAP requests.
+author:
+  - Linus
+date: 2024/07/16
+modified: 2024/07/16
+tags:
+  - attack.discovery
+  - attack.t1482
+  - attack.t1087
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: medium
+  kusto: |
+    let known_ad_consumers = IdentityQueryEvents
+    | where Timestamp between (ago(30d) .. ago(1d))
+    | summarize count = count() by IPAddress, DeviceName;
+    IdentityQueryEvents
+    | where Timestamp between (ago(1d) .. now())
+    | summarize count = count() by IPAddress, DeviceName
+    | join kind=anti known_ad_consumers on IPAddress, DeviceName
+    | where count > 50
+    | extend DeviceName = strcat(tolower(DeviceName),".{{domain}}")
+    | join kind=leftouter (DeviceInfo | where Timestamp > ago(1d) | summarize make_set(PublicIP), make_set(LoggedOnUsers) by DeviceName, DeviceId, OSPlatform, OSBuild, OSVersion, OSDistribution, OSVersionInfo) on DeviceName
+falsepositives:
+  - Devices that have been of the network for over 30 Days
+investigation:
+  - If the host doing the queries is not onboarded in MS Defender for Endpoint the Endpoint.
+  - If the host is not onboarded there will be information missing, and it can be an idicator to look closer since that device has less protection.
+level: medium

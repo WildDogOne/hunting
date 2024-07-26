@@ -1,0 +1,47 @@
+title: Disable or Modify MDE
+id: d7ae29e3-ecb4-4d06-b104-33a78d3aae1c
+status: test
+description: |
+    The detection watches the commandline logs for known commands that are used to disable the Defender AV.
+    It is loosely based on https://github.com/FalconForceTeam/FalconFriday/blob/master/Defense%20Evasion/T1562-WIN-001.md
+    However it improves on that by splitting the commandline into process and arguments.
+    Then it compares the arguments with the known bad arguments.
+    If the intersection is equal or higher to the bad arguments, the detection triggers.
+    Honestly no clue if it actually works...
+references:
+    - https://github.com/FalconForceTeam/FalconFriday/blob/master/Defense%20Evasion/T1562-WIN-001.md
+author:
+    - Linus
+    - FalconForce
+date: 05.06.2024
+modified: 05.06.2024
+tags:
+    - attack.defense_evasion
+    - attack.t1562.001
+    - falcon.T1562-WIN-001
+logsource:
+    product: microsoft defender for endpoint
+detection:
+    load: medium
+    kusto: |
+        let ProcessRelations=datatable(process:string,bad_args:dynamic) [
+                "Set-MpPreference", dynamic(["-DisableRealtimeMonitoring", "$true"]),
+                "Set-MpPreference", dynamic(["-DisableBehaviorMonitoring", "$true"]),
+                "Set-MpPreference", dynamic(["-ExclusionProcess"]),
+                "Set-MpPreference", dynamic(["-ExclusionExtension","dll"]),
+                "net", dynamic(["stop","security","center"]),
+                "sc", dynamic(["stop","WinDefend"]),
+                "sc", dynamic(["delete","WinDefend"])
+        ];
+        DeviceProcessEvents
+        | extend process = tostring(parse_command_line(ProcessCommandLine, "windows")[0])
+        | extend process_args = parse_command_line(ProcessCommandLine, "windows")
+        | where process in~ (ProcessRelations)
+        | lookup kind=inner ProcessRelations on process
+        | project-reorder process_args, bad_args
+        | extend intersection = set_intersect(process_args, bad_args)
+        | where array_length(intersection) >= array_length(bad_args)
+        | limit 10
+falsepositives:
+    - Unknown
+level: medium

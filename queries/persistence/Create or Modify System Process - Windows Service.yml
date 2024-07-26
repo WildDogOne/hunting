@@ -1,0 +1,40 @@
+title: Create or Modify System Process - Windows Service
+id: 1d093cbc-6c01-4d2c-aefb-e41b349d6204
+status: test
+description: |
+  Windows services can be used as a means of persistence in an environment, and can be created in multiple ways, one of which is remotely.
+  Doing so often involves this service creation will be executed over RPC.
+references:
+  - https://github.com/FalconForceTeam/FalconFriday/blob/master/Persistence/T1543.003-WIN-001.md
+author:
+  - FalconForce
+date: 2024/07/05
+modified: 2024/07/05
+tags:
+  - attack.persistence
+  - attack.t1543.003
+  - falcon.T1543.003-WIN-001
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: low
+  kusto: |
+    let netevents=DeviceNetworkEvents 
+    | where ActionType == "InboundConnectionAccepted"
+    | where InitiatingProcessFolderPath == @"c:\windows\system32\services.exe"
+    // IMPORTANT There is some legitimate use for maintenance by support teams, filter their IP addresses/blocks below
+    | where not(RemoteIP has_any ("maintenance-ip-1","maintenance-ip-2","maintenance-ip-3"))
+    | project Timestamp,DeviceId,ActionType,InitiatingProcessFolderPath, DeviceName, RemoteIP, InitiatingProcessId;
+    let regevents=DeviceRegistryEvents 
+    | where RegistryKey contains @"\System\CurrentControlSet\Services" or RegistryKey contains @"\System\ControlSet001\Services"
+    | where ActionType contains "Created"
+    |project DeviceId, ActionType, RegistryKey, RegistryValueType,RegistryValueData, InitiatingProcessFolderPath,InitiatingProcessId, DeviceName;
+    let rpcservices = 
+      netevents
+      | join kind=leftouter  (regevents) on DeviceId, InitiatingProcessFolderPath,InitiatingProcessId;
+    rpcservices
+    | project Timestamp,DeviceName,RemoteIP,ActionType1 ,RegistryKey, RegistryValueType, RegistryValueData
+    |summarize count() by RemoteIP
+  falsepositives:
+  - N/A
+level: medium

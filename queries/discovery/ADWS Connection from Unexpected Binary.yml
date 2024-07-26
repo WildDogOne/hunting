@@ -1,0 +1,44 @@
+title: ADWS Connection from Unexpected Binary
+id: 679cc055-cbe8-4b30-a539-484189899748
+status: test
+description: |
+  ADWS is a Windows service that allows Active Directory to be queried via a web service.
+  While this service is not malicious by itself, it can be used by attackers to query Active Directory from compromised machines.
+references:
+  - https://github.com/FalconForceTeam/FalconFriday/blob/master/Discovery/ADWS_Connection_from_Unexpected_Binary-Win.md
+author:
+  - FalconForce
+date: 04.07.2024
+modified: 04.07.2024
+tags:
+  - attack.collection
+  - attack.discovery
+  - attack.t1119
+  - attack.t1087.002
+  - falcon.ADWS_Connection_from_Unexpected_Binary-Win
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: low
+  kusto: |
+    let timeframe = 2*1h;
+    let ADWSIPs=(
+        DeviceNetworkEvents
+        | where ingestion_time() >= ago(timeframe)
+        | where InitiatingProcessFolderPath == @"c:\windows\adws\microsoft.activedirectory.webservices.exe"
+        | where LocalPort == 9389
+        | distinct LocalIP
+    );
+    DeviceNetworkEvents
+    | where ingestion_time() >= ago(timeframe)
+    | where ActionType == "ConnectionSuccess"
+    | where RemotePort == 9389
+    | where RemoteIP in (ADWSIPs)
+    | where not(isempty(InitiatingProcessFileName))
+    | where not(InitiatingProcessFolderPath in~ (@"c:\windows\system32\dsac.exe", @"c:\program files\powershell\7\pwsh.exe"))
+    | where not(InitiatingProcessFolderPath startswith @"c:\windows\system32\windowspowershell\")
+    | where not(InitiatingProcessFolderPath startswith @"c:\windows\syswow64\windowspowershell\")
+    | where not(InitiatingProcessFolderPath startswith @"c:\program files\microsoft monitoring agent\")
+falsepositives:
+  - None expected
+level: medium

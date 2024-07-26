@@ -1,0 +1,35 @@
+title: Suspicious WMI Executions
+id: 21912764-70fb-4cb5-ab43-303c703045c6
+status: test
+description: |
+  This query detects processes with WMI as parent.
+  It compared the last 30days against the last 24h to detect anomalies.
+  CCM has been removed from the query as it is a common false positive.
+author:
+  - FalconForce
+date: 2024/07/17
+modified: 2024/07/17
+tags:
+  - attack.execution
+  - attack.t1047
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: medium
+  kusto: |
+    let timeframe = 7d;
+    let common_clis = DeviceProcessEvents
+    | where Timestamp between (ago(30d) .. ago(timeframe))
+    | where InitiatingProcessFileName == "wmiprvse.exe" or InitiatingProcessParentFileName == "wmiprvse.exe"
+    | summarize count = count() by ProcessCommandLine
+    | where count > 50;
+    DeviceProcessEvents
+    | where Timestamp > ago(timeframe)
+    | where InitiatingProcessFileName == "wmiprvse.exe" or InitiatingProcessParentFileName == "wmiprvse.exe"
+    | extend commandline = parse_command_line(ProcessCommandLine, "windows")
+    | project-reorder commandline
+    | where not(commandline has_any (@"C:\Windows\CCM\")) // Remove CCM, not good practice I guess, but what can you do
+    | join kind=anti common_clis on ProcessCommandLine // Removes frequently seen commandlines
+falsepositives:
+  - N/A
+level: medium

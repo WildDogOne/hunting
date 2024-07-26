@@ -1,0 +1,28 @@
+title: User-Execution - Process Injection
+id: d545863a-a731-4ddd-9e94-59fac708d7b9
+status: test
+description: |
+    Malicious (office) files is an technique where users are tricked to open a file controlled by an attacker, which in turn triggers code execution on the victims system.
+    A well known examples are various forms of office macros which in turn try to run other binaries (like lolbins) or inject code into other processes in order to gain code execution.
+references:
+    - https://github.com/FalconForceTeam/FalconFriday/blob/9cb56ec1a302f2ce9630d27cd8cab5b8688ee259/Execution/T1204-WIN-001.md
+author:
+    - FalconForce
+date: 05.06.2024
+modified: 05.06.2024
+tags:
+    - attack.execution
+    - attack.t1204
+logsource:
+    product: microsoft defender for endpoint
+detection:
+    load: low
+    kusto: |
+        DeviceEvents 
+        | where ActionType in ("CreateRemoteThreadApiCall", "QueueUserApcRemoteApiCall", "SetThreadContextRemoteApiCall")
+        | where InitiatingProcessFileName in~ ("winword.exe", "excel.exe", "powerpnt.exe")
+        | where InitiatingProcessCommandLine has_any (".doc", ".wbk", ".docm", ".dot", ".dotm" ".xls", ".xlsm", ".xltm", ".xla",".xll", ".xlam", ".ppt", ".pptm", ".pot", ".potm", ".ppsm", ".sldm") and not(InitiatingProcessCommandLine has_any (".docx", "dotx",".xlsx", ".xltx", ".pptx"))
+falsepositives:
+    - There are legitimate reasons an office application may call a lolbin. Rundll32.exe for printers and csc.exe for defender tasks come to mind.
+    - Some management & installation scripts use vbs/jscript files for legit purposes.
+level: medium

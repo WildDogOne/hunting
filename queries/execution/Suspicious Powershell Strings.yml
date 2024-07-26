@@ -1,0 +1,34 @@
+title: Suspicious Powershell Strings
+id: 73be56f1-c16d-4fa8-9cab-1b4d352aa56d
+status: test
+description: |
+  Detects suspicious strings in PowerShell commands that are not commonly used in normal operations.
+references:
+  - https://github.com/olafhartong/Invoke-Phant0m/blob/master/Invoke-Phant0m.ps1
+  - https://github.com/vadim-hunter/Detection-Ideas-Rules/blob/main/Tools/Invoke-Phant0m.yaml
+author:
+  - Linus
+date: 2024/07/25
+modified: 2024/07/25
+tags:
+  - attack.execution
+  - attack.t1059.001
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: low
+  kusto: |
+    DeviceEvents
+    | where Timestamp > ago(30d)
+    | where ActionType == "PowerShellCommand"
+    | extend Command = tostring(parse_json(AdditionalFields)["Command"])
+    | distinct Command
+    | where Command contains "Dbghelp::SymLoadModuleEx" or
+            Command contains "MappedFile" or
+            Command contains "OpenThread" or
+            Command contains "TerminateThread" or
+            Command contains "SuspendThread" or
+            Command contains "Runtime.InteropServices.DllImportAttribute"
+falsepositives:
+  - N/A
+level: medium

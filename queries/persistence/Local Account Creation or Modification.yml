@@ -1,0 +1,36 @@
+title: Local Account Creation or Modification
+id: db9a224d-23eb-409f-a373-11ffcf4f6ca9
+status: test
+description: |
+  An attacker might create a local account to maintain access to a system.
+  This can be done by creating a new user account or by modifying an existing one.
+author:
+  - Linus
+date: 2024/07/17
+modified: 2024/07/17
+tags:
+  - attack.persistence
+  - attack.t1136.001
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: low
+  kusto: |
+    let timeframe = 7d;
+    let lenovo_accounts = DeviceEvents // This whole whitelist is for lenovo accounts that have been deleted again
+    | where Timestamp > ago(timeframe)
+    | where ActionType == "UserAccountDeleted"
+    | where AccountName startswith "lenovo"
+    | summarize by DeviceName, AccountName;
+    DeviceEvents
+    | where Timestamp > ago(timeframe)
+    | where ActionType == "UserAccountCreated" or ActionType == "UserAccountModified"
+    //| summarize by DeviceName, InitiatingProcessAccountName, AccountName
+    | join kind=anti lenovo_accounts on DeviceName and AccountName
+    | join (DeviceLogonEvents | where Timestamp > ago(timeframe) | summarize LogonTypes = make_set(LogonType), LocalAdmin = make_set(IsLocalAdmin) by DeviceName, AccountName) on DeviceName and AccountName
+    | project-reorder Timestamp, AccountName, LocalAdmin, LogonTypes, ActionType, DeviceName
+falsepositives:
+  - Lenovo seems to make temporary local accounts
+investigation:
+  - It makes sense to check if the account created has Admin Rights
+level: medium

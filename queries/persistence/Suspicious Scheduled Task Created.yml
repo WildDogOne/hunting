@@ -1,0 +1,46 @@
+title: Suspicious Scheduled Task Created
+id: 1c6878b7-990a-4710-afdc-f4e7c4471514
+status: test
+description: |
+  This query detects suspicious scheduled tasks that are created by non-system accounts.
+references:
+  - https://github.com/FalconForceTeam/FalconFriday/blob/master/Persistence/T1053.005-WIN-001.md
+author:
+  - Linus
+  - FalconForce
+date: 2024/07/17
+modified: 2024/07/17
+tags:
+  - attack.persistence
+  - attack.t1053
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: low
+  kusto: |
+    let timeframe = 1d;
+    let known_scheduled_tasks = DeviceEvents
+    | where Timestamp between (ago(30d) .. ago(timeframe))
+    | where ActionType == "ScheduledTaskCreated" or ActionType == "ScheduledTaskUpdated"
+    | extend TaskName = tostring(parse_json(AdditionalFields)["TaskName"])
+    | extend TaskContent = tostring(parse_json(AdditionalFields)["TaskContent"])
+    | extend Actions = tostring(parse_json(TaskContent)["Actions"])
+    | extend ExecCommand = tostring(parse_json(Actions)["Exec"]["Command"])
+    | extend cleanedExecCommand = replace_regex(ExecCommand, @"\w:\\Users\\.*?\\", "")
+    | summarize count() by TaskName, cleanedExecCommand;
+    DeviceEvents
+    | where Timestamp > ago(timeframe)
+    | where ActionType == "ScheduledTaskCreated" or ActionType == "ScheduledTaskUpdated"
+    | where InitiatingProcessAccountSid != @"S-1-5-18"
+    | where InitiatingProcessAccountSid != @"S-1-5-20"
+    | extend TaskName = tostring(parse_json(AdditionalFields)["TaskName"])
+    | extend TaskContent = tostring(parse_json(AdditionalFields)["TaskContent"])
+    | extend SubjectUserName = tostring(parse_json(AdditionalFields)["SubjectUserName"])
+    | extend Actions = tostring(parse_json(TaskContent)["Actions"])
+    | extend ExecCommand = tostring(parse_json(Actions)["Exec"]["Command"])
+    | extend cleanedExecCommand = replace_regex(ExecCommand, @"\w:\\Users\\.*?\\", "")
+    | project-reorder TaskName, ExecCommand, TaskContent, SubjectUserName
+    | join kind=anti known_scheduled_tasks on cleanedExecCommand //and TaskName
+  falsepositives:
+  - N/A
+level: medium

@@ -1,0 +1,37 @@
+title: Spearhishing with Punycode
+id: d6a72683-2cdf-43f3-91ed-e2c45b98a99d
+status: test
+description: |
+  Same idea as Spearhishing with Punycode but for Email URLs.
+references:
+  - https://learn.microsoft.com/en-us/azure/data-explorer/kusto/query/punycode-domain-from-string-function
+author:
+  - Linus
+date: 2024/07/14
+modified: 2024/07/14
+tags:
+  - attack.initial_access
+  - attack.t1566.002
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: low
+  kusto: |
+    EmailUrlInfo
+    | where Timestamp > ago(7d)
+    | where UrlDomain matches regex "xn--[a-z0-9]+"
+    | extend decoded = punycode_domain_from_string(UrlDomain)
+    | project-reorder decoded
+    | where not(decoded matches regex "[äöüéèê]") // Some Basic whitelisting since Switzerland uses umlauts
+    | summarize by bin(Timestamp, 1d), decoded, Url, UrlLocation, NetworkMessageId
+    | join (EmailEvents| summarize make_set(RecipientEmailAddress), make_set(DeliveryAction) by NetworkMessageId, SenderDisplayName, SenderFromAddress, SenderMailFromAddress, Subject) on NetworkMessageId
+    | where set_DeliveryAction has_any ( "Delivered")
+falsepositives:
+  - Unknown
+level: medium
+
+
+
+
+
+

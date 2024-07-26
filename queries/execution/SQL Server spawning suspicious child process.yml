@@ -1,0 +1,44 @@
+title: SQL Server spawning suspicious child process
+id: 6ca1d57d-bd03-4f13-9ef8-c6bcf05d8b93
+status: test
+description: |
+    This query looks for potential abuse of the SQL Server stored procedure xp_cmdshell which allows command execution on the OS.
+    Running xp_cmdshell on the system triggers the follow process chain:
+    sqlservr.exe => xp_cmdshell 'whoami' => "cmd.exe /c" whoami => whoami.exe.
+    This rule tries to identify running of suspicious commands as a grandchild of sqlservr.exe.
+    The rule is based on a blacklist of executables based on a list of lolbins and other known recon commands or any executable executed with a low prevalence.
+references:
+    - https://github.com/FalconForceTeam/FalconFriday/blob/9cb56ec1a302f2ce9630d27cd8cab5b8688ee259/Execution/T1611-WIN-001.md
+author:
+    - FalconForce
+date: 2024/07/05
+modified: 2024/07/05
+tags:
+    - attack.execution
+    - attack.persistence
+    - attack.t1611
+    - attack.t1505
+    - falcon.t1611-win-001
+logsource:
+    product: microsoft defender for endpoint
+detection:
+    load: medium
+    kusto: |
+        let lolbins = dynamic(["at.exe", "atbroker.exe", "bash.exe", "bitsadmin.exe", "certreq.exe", "certutil.exe", "cmd.exe", "cmdkey.exe", "cmstp.exe", "control.exe", "csc.exe", "cscript.exe", "desktopimgdownldr.exe", "dfsvc.exe", "diantz.exe", "diskshadow.exe", "dnscmd.exe", "esentutl.exe", "eventvwr.exe", "expand.exe", "extexport.exe", "extrac32.exe", "findstr.exe", "forfiles.exe", "ftp.exe", "gfxdownloadwrapper.exe", "gpscript.exe", "hh.exe", "ie4uinit.exe", "ieexec.exe", "ilasm.exe", "infdefaultinstall.exe", "installutil.exe", "jsc.exe", "makecab.exe", "mavinject.exe", "microsoft.workflow.compiler.exe", "mmc.exe", "mpcmdrun.exe", "msbuild.exe", "msconfig.exe", "msdt.exe", "mshta.exe", "msiexec.exe", "netsh.exe", "odbcconf.exe", "pcalua.exe", "pcwrun.exe", "pktmon.exe", "presentationhost.exe", "print.exe", "psr.exe", "rasautou.exe", "reg.exe", "regasm.exe", "regedit.exe", "regini.exe", "register-cimprovider.exe", "regsvcs.exe", "regsvr32.exe", "replace.exe", "rpcping.exe", "rundll32.exe", "runonce.exe", "runscripthelper.exe", "sc.exe", "schtasks.exe", "scriptrunner.exe", "syncappvpublishingserver.exe", "ttdinject.exe", "tttracer.exe", "vbc.exe", "verclsid.exe", "wab.exe", "wmic.exe", "wscript.exe", "wsreset.exe", "xwizard.exe", "agentexecutor.exe", "appvlp.exe", "bginfo.exe", "cdb.exe", "csi.exe", "devtoolslauncher.exe", "dnx.exe", "dotnet.exe", "dxcap.exe", "excel.exe", "mftrace.exe", "msdeploy.exe", "msxsl.exe", "ntdsutil.exe", "powerpnt.exe", "rcsi.exe", "sqldumper.exe", "sqlps.exe", "sqltoolsps.exe", "squirrel.exe", "te.exe", "tracker.exe", "vsjitdebugger.exe", "winword.exe", "wsl.exe"]);
+        let binaries_of_interest = dynamic(["net.exe", "net1.exe", "whoami.exe", "ipconfig.exe", "tasklist.exe", "quser.exe", "tracert.exe", "route.exe", "runas.exe", "klist.exe", "wevtutil.exe", "wmiprvse.exe", "powershell.exe", "bash.exe", "qwinsta.exe", "rwinsta.exe", "replace.exe", "findstr.exe", "icacls.exe", "cacls.exe", "xcopy.exe", "robocopy.exe", "takeown.exe", "vssadmin.exe", "nltest.exe", "nltestk.exe", "sctasks.exe", "nbtstat.exe", "nbtinfo.exe", "mofcomp.exe", "nltestrk.exe", "dnscmd.exe", "registercimprovider.exe", "registercimprovider2.exe", "procdump", "ru.exe", "pspasswd.exe", "psexec.c", "psexec.exe", "pslist.exe", "regsize", "pskill.exe", "pkill.exe", "wsmprovhost.exe", "fltmc.exe", "sdbinst.exe"]);
+        // Merge both lists into one reference list
+        let original_file_name_set=array_concat(lolbins,binaries_of_interest);
+        let allGrandChilderen = DeviceProcessEvents // based on some unscientific testing, this is faster than using materialize() in this case
+        | where InitiatingProcessParentFileName =~ "sqlservr.exe"
+        | where InitiatingProcessCommandLine startswith "\"cmd.exe\" /c";
+        let allSuspiciousHashes = allGrandChilderen
+        | distinct SHA1
+        | invoke FileProfile(SHA1, 1000)
+        | where GlobalPrevalence < 250 or isempty(GlobalPrevalence) or not(isempty(ThreatName));
+        allGrandChilderen
+        | where FileName in~ (original_file_name_set) or SHA1 in ((allSuspiciousHashes))
+        | join kind=leftouter allSuspiciousHashes on SHA1
+        // client specific filter below
+falsepositives:
+    - Unknown
+level: medium

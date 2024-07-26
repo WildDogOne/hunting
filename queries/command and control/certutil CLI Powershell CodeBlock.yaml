@@ -1,0 +1,40 @@
+title: certutil CLI Powershell CodeBlock
+id: 395ba978-b674-4ff3-b775-6bb62db5a62a
+status: test
+description: |
+    This detection addresses the same problems as the Policy "cerutitl CLI" but focuses on the use of certutil in a PowerShell code block.
+references:
+    - https://github.com/FalconForceTeam/FalconFriday/blob/master/Command%20and%20Control/T1105-WIN-001.md
+author:
+    - FalconForce
+    - Linus
+date: 2024/06/05
+modified: 2024/06/
+tags:
+    - attack.command_and_control
+    - attack.t1105
+    - attack.t1564.004
+    - attack.t1027
+    - attack.t1140
+    - falcon.T1105-WIN-001
+logsource:
+    product: microsoft defender for endpoint
+detection:
+    load: low
+    kusto: |
+        // set the time span for the query
+        let Timeframe = 30d;
+        // set the HashTimeframe for the hash lookup, longer makes more accurate but obviously also more resource intensive
+        let HashTimeframe = 30d;
+        // Get all known SHA1 hashes for certutil executions or renamed files formerly named certutil
+        let CertUtilPESha1=DeviceProcessEvents | where Timestamp > ago(HashTimeframe)| where FileName contains "certutil"  | where isnotempty(SHA1) | summarize sha1=make_set(SHA1);
+        let CertUtilFESha1=DeviceFileEvents | where Timestamp > ago(HashTimeframe)| where PreviousFileName contains "certutil" or FileName contains "certutil"  | where isnotempty(SHA1) | summarize sha1=make_set(SHA1);
+        DeviceEvents
+        | where Timestamp > ago(Timeframe)
+        | where ActionType == "PowerShellCommand"
+        | extend PowerShellCommand = tostring(parse_json(AdditionalFields)["Command"])
+        | where InitiatingProcessSHA1 in (CertUtilPESha1) or InitiatingProcessSHA1 in (CertUtilFESha1) or InitiatingProcessFileName =~ "certutil.exe" or PowerShellCommand contains "certutil"
+        | project-reorder PowerShellCommand
+falsepositives:
+    - Unknown
+level: medium

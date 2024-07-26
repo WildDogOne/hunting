@@ -1,0 +1,51 @@
+title: Possible Stolen Cookies
+id: 03f58448-28fc-4391-a791-9e7029eab6b7
+status: test
+description: |
+  This detection compares the last 30 days of failed logon attempts per ISP and Country against active user sessions with the same ISP and Country.
+author:
+  - FalconForce
+date: 2024/07/16
+modified: 2024/07/16
+tags:
+  - attack.credential_access
+  - attack.t1539
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: high
+  kusto: |
+    let bad_isp = IdentityLogonEvents
+    | where Timestamp between ( ago(30d).. now())
+    | summarize valid = countif(ActionType == "LogonSuccess"),
+                failure = countif( ActionType == "LogonFailed"),
+                make_set(IPAddress) by ISP, Location
+    | order by failure
+    | where valid == 0 and failure > 5;
+    CloudAppEvents
+    | where Timestamp between (ago(1d) .. now())
+    | where ActionType != "TIMailData-Inline"
+    | where ISP != "Microsoft Corporation" and ISP != "Microsoft Azure" // Wait too many hits, pretty sure Azure bs
+    | where IsExternalUser == 0
+    | summarize Actions=count() by AccountDisplayName,
+                                AccountId,
+                                ActionType,
+                                ISP,
+                                CountryCode,
+                                DeviceType,
+                                OSPlatform,
+                                UserAgent
+    | join kind=inner bad_isp on $left.ISP == $right.ISP and $left.CountryCode == $right.Location
+    | summarize make_set(ActionType) by AccountDisplayName,
+                                        AccountId,
+                                        ISP,
+                                        CountryCode,
+                                        Past_Failures_From_ISP = failure,
+                                        Past_Success_From_ISP = valid,
+                                        DeviceType,
+                                        OSPlatform,
+                                        UserAgent
+    | order by Past_Failures_From_ISP desc
+falsepositives:
+  - N/A
+level: medium

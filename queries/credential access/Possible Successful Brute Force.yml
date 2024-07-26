@@ -1,0 +1,52 @@
+title: Possible Successful Brute Force
+id: 9a912b96-5789-4e21-b540-7c8056c4aef0
+status: test
+description: |
+  This detection compares the last 30 days of failed logon attempts to the last 24h successful logon attempts from same Location and ISP.
+author:
+  - Sergio
+  - Linus
+date: 2024/07/16
+modified: 2024/07/16
+tags:
+  - attack.credential_access
+  - attack.t1110
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: high
+  kusto: |
+    let bad_isp = IdentityLogonEvents
+    | where Timestamp between ( ago(30d).. ago(1d))
+    | project ISP, Location, IPAddress, ActionType
+    | summarize valid = countif(ActionType == "LogonSuccess"),
+                failure = countif( ActionType == "LogonFailed"),
+                make_set(IPAddress) by ISP, Location
+    | order by failure
+    | where valid == 0 and failure > 5;
+    IdentityLogonEvents
+    | where Timestamp between (ago(1d) .. now())
+    | where ActionType == "LogonSuccess"
+    | join kind=inner bad_isp on $left.ISP == $right.ISP and $left.Location == $right.Location
+    | project Timestamp,
+                AccountName,
+                AccountDisplayName,
+                ISP,
+                IPAddress,
+                Location,
+                ActionType,
+                Application,
+                LogonType,
+                DeviceType,
+                OSPlatform,
+                AdditionalFields,
+                UncommonForUser,
+                // Table of Values when they where last seen for that User
+                // Example IPS = 1 means the ISP has been seen on this User 1 day ago
+                // https://learn.microsoft.com/en-us/defender-xdr/advanced-hunting-cloudappevents-table
+                LastSeenForUser,
+                Past_Failures_From_ISP = failure,
+                Past_Success_From_ISP = valid
+  falsepositives:
+    - People on holiday in suspicious countries (Sorry China)
+level: medium

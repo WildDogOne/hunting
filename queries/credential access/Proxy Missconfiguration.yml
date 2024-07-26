@@ -1,0 +1,35 @@
+title: Proxy Missconfiguration
+id: 6e6f7f99-1a3b-4a40-989a-2701a811ad94
+status: test
+description: |
+  Regardless of if a company uses an explicit proxy or not, it makes sense to check the configuration.
+  This query checks for changes to the registry hive used by Windows to store proxy settings.
+  A rouge proxy can be used for a MitM attack, or to exfiltrate data.
+author:
+  - Linus
+date: 2024/07/15
+modified: 2024/07/15
+tags:
+  - attack.credential_access
+  - attack.t1557.001
+  - attack.t1557
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: low
+  kusto: |
+    let company_proxy = dynamic([]); // Add IPs or Hostnames of your proxy servers here
+    DeviceRegistryEvents
+    | where Timestamp > ago(30d)
+    | where ActionType == "RegistryValueSet"
+    | where RegistryValueName == "ProxyServer"
+    | where isnotempty(RegistryValueData)
+    | where RegistryKey contains "Internet Settings"
+    | extend proxy_address = extract(@"((.*)?):", 1, RegistryValueData)
+    | where not(proxy_address has_any (company_proxy))
+    | project-reorder Timestamp, DeviceName, proxy_address
+falsepositives:
+  - N/A
+level: high
+
+

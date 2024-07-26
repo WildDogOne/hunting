@@ -1,0 +1,39 @@
+title: Spearhishing with Punycode
+id: d6a72683-2cdf-43f3-91ed-e2c45b98a99d
+status: test
+description: |
+  This rule detects URLs with Punycode encoding, which is a common technique used by attackers to obfuscate their URLs.
+references:
+  - https://learn.microsoft.com/en-us/azure/data-explorer/kusto/query/punycode-domain-from-string-function
+author:
+  - Linus
+date: 2024/07/14
+modified: 2024/07/14
+tags:
+  - attack.initial_access
+  - attack.t1566.002
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: low
+  kusto: |
+    DeviceNetworkEvents
+    | where Timestamp > ago(30d)
+    | where isnotempty( RemoteUrl)
+    | where RemoteUrl matches regex "xn--[a-z0-9]+"
+    | extend decoded = replace_strings(RemoteUrl, dynamic(["http://","https://"]), dynamic(["",""]))
+    | extend decoded = punycode_domain_from_string(decoded)
+    | summarize by decoded, RemoteUrl, InitiatingProcessFileName, InitiatingProcessParentFileName, DeviceName, RemoteIP
+    | extend geo = geo_info_from_ip_address(RemoteIP)
+    | extend country = tostring(geo["country"])
+    | where not(decoded matches regex "[äöüéèê]") // Some Basic whitelisting since Switzerland uses umlauts
+    | project-reorder decoded, RemoteIP, country, InitiatingProcessFileName, InitiatingProcessParentFileName, DeviceName
+falsepositives:
+  - Unknown
+level: medium
+
+
+
+
+
+

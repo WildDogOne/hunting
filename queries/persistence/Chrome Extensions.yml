@@ -1,0 +1,61 @@
+title: Chrome Extensions
+id: db9a224d-23eb-409f-a373-11ffcf4f6ca9
+status: test
+description: |
+  An attacker can install its own or infect a highjacked browser extension to gain persistence and control over a system.
+  Depending on the intent of the attacker he can have full control over all communication the browser has, execute new processes, have a stable command and control channel and much more.
+references:
+  - https://github.com/FalconForceTeam/FalconFriday/blob/master/Persistence/T1176-WIN-001.md
+author:
+  - FalconForce
+date: 2024/07/05
+modified: 2024/07/05
+tags:
+  - attack.persistence
+  - attack.t1176
+  - falcon.T1176-WIN-001
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: low
+  kusto: |
+    let KnownExtensions = datatable(ExtensionName:string, ExtensionId:string)
+    [
+    //Official Google Extensions, installed by default
+    "Google Mail","pjkljhegncpnkpknbcohdijeoejaedia",
+    "Google Drive","apdfllckaahabafndbhieahigkjlhalf",
+    "Google Docs","aohghmighlieiainnegkcijnfilokake",
+    "Google Docs Offline","ghbmnnjooekpmoecnnnilnnbdlolhkhi",
+    "Google Sheets","felcaaldnbdncclmgdcncolpebgiejap",
+    "Google Slides","aapocclcgogkmnckokdopfmhonfmgoek",
+    "YouTube","blpcfgokakmgnkcojhhkbfbldkacnbeo",
+    // Deprecated Google Extensions, transitioned into the browser
+    "Chrome PDF Viewer","mhjfbmdgcfjbbpaeojofohoefgiehjai",
+    "Google Wallet","nmmhkkegccagdldgiimedpiccmgmieda",
+    "Chrome Cast","pkedcjkdefgpdelpbcmbmeomcjbeemfm",
+    "Google Web Store","nmmhkkegccagdldgiimedpiccmgmieda",
+    // Some other commonly observed security Extensions
+    "AdBlock","gighmmpiobklfepjocnamgkkbiglidom",
+    "AdBlock Plus","cfhdojbkjhnklbpkdaibdccddilifddb",
+    "uBlock","epcnnfbjfcgphgdmggkamkmgojdagdnn",
+    "uBlock Origin","cjpalhdlnbpafiamejdnhcphjbkeiagm",
+    "Ghostery","mlomiejdfkolichcflejclcbmpeaniij",
+    "Privacy Badger","pkehgijcmpdhfbdbbnkijodmdjhbjlgp",
+    "Disconnect","jeoacafpbcihiomhlakheieifhpjdfeo",
+    "HTTPS Everywhere","gcbommkclmclpchllfjekcdonpmejbdp",
+    // Some other known Extensions
+    "Adobe Acrobat","efaidnbmnnnibpcajpcglclefindmkaj",
+    "Foxit PDF Creator","cifnddnffldieaamihfkhkdgnbhfmaci",
+    "Cisco Webex Extension","jlhmfgmfgeifomenelglieieghnjghma",
+    "Google Translate","aapbdbdomjkkjkaonfhkkikfgjllcleb"
+    ];
+    DeviceFileEvents
+    | where ActionType == "FileCreated" and (InitiatingProcessFileName contains "chrome" or InitiatingProcessFileName contains "edge" or InitiatingProcessFileName contains "brave" or InitiatingProcessFileName contains "vivaldi")  and (FolderPath contains "User Data\\Default\\Extensions" or FolderPath endswith ".crx") and FolderPath notcontains "Temp"
+    | extend ExtensionId = extract("([a-z]{32})", 1, FolderPath)
+    | summarize count() by ExtensionId, DeviceName
+    | join kind = leftouter (KnownExtensions | project ExtensionId = tolower(ExtensionId), ExtensionName) on ExtensionId
+    | project ExtensionName,ExtensionId, DeviceName
+    | sort by ExtensionName asc
+  falsepositives:
+  - N/A
+level: medium

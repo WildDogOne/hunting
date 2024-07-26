@@ -1,0 +1,79 @@
+title: Spearhishing with Swiss Domain
+id: caed046d-09c9-4fed-93fb-299abed265c1
+status: test
+description: |
+  This rule tries to find suspicious swiss domains that are not from the EU.
+author:
+  - Linus
+date: 2024/07/14
+modified: 2024/07/14
+tags:
+  - attack.initial_access
+  - attack.t1566.002
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: low
+  kusto: |
+    // This is a denoiser to reduce false positives
+    // It tries to find Public IPs with many different domains, this can indicate that it's a CDN or similar
+    let noise =
+    DeviceNetworkEvents
+    | where isnotempty(RemoteUrl)
+    | where not(ipv4_is_private(RemoteIP))
+    | where not(ipv4_is_in_range(RemoteIP, "{{company_ip_cidr}}"))
+    | extend url = iff((RemoteUrl startswith "http"), RemoteUrl, strcat("https://", RemoteUrl))
+    | extend url = parse_url(url)
+    | extend host = tostring(url["Host"])
+    | extend host = extract(@"[^\.]*\..{1,4}$", 0, host)
+    | summarize urls = make_set(host) by RemoteIP
+    | where array_length(urls) > 10
+    | extend geo = geo_info_from_ip_address(RemoteIP)
+    | extend geo_country = tostring(geo["country"])
+    | where not(geo_country in ( "Jordan", "Ukraine", "Russia", "Brazil", "Nigeria", "Iran", "Israel")) // Blacklisting countries that should not be in the denoiser
+    | summarize by RemoteIP;
+    let ok_countries = dynamic(["Switzerland",
+                                "Italy",
+                                "Germany",
+                                "The Netherlands",
+                                "United States",
+                                "Ireland",
+                                "France",
+                                "Austria",
+                                "Finland",
+                                "Denmark",
+                                "Sweden",
+                                "Belgium",
+                                "Czechia",
+                                "Spain",
+                                "Luxembourg",
+                                "Norway",
+                                "Romania",
+                                "Slovakia",
+                                "United Kingdom"]);
+    DeviceNetworkEvents
+    | where Timestamp > ago(1d)
+    | where isnotempty(RemoteUrl)
+    | where not(ipv4_is_private(RemoteIP))
+    | where not(ipv4_is_in_range(RemoteIP, "{{company_ip_cidr}}"))
+    | where RemoteIP != "1.0.0.1" // Possible whitelisting approach to find people using Cloudflare DNS and got blackholed or something
+    | extend url = iff((RemoteUrl startswith "http"), RemoteUrl, strcat("https://", RemoteUrl))
+    | extend url = parse_url(url)
+    | where url["Host"] endswith ".ch"
+    | join kind=anti noise on RemoteIP
+    | extend geo = geo_info_from_ip_address(RemoteIP)
+    | where isnotempty( geo["country"])
+    | where not(geo["country"] has_any (ok_countries)) // whitelisting countries which might be expected to host Swiss Domains
+    | join DeviceInfo on DeviceId
+    | extend local_geo = geo_info_from_ip_address(PublicIP)
+    //| where tostring(local_geo["country"]) != tostring(geo["country"]) // Possible whitelisting approach to find people working abroad or using VPNs
+    | summarize make_set(RemoteUrl), make_set(RemoteIP), make_set(PublicIP) by tostring(url["Host"]),DeviceName, tostring(geo["country"]), tostring(local_geo["country"])
+falsepositives:
+  - Unknown
+level: medium
+
+
+
+
+
+

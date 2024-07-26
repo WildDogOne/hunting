@@ -1,0 +1,57 @@
+title: Match Legitimate Name or Location
+id: 5e3775a8-f285-4fd5-a556-398538efb8ae
+status: test
+description: |
+  This rule detects mismatches in the parent-child relationship of core operating system processes to uncover different masquerading attempts.
+  Good resource for this could be https://www.echotrail.io/ which provides a list of legitimate parent-child relationships for core operating system processes.
+  Alternatively one could a timeframe reference, to compare past parent-child relationships with the current ones, this is however only really usefull if the query is run often.
+references:
+  - https://github.com/FalconForceTeam/FalconFriday/blob/master/Defense%20Evasion/T1036.005-WIN-001.md
+  - https://www.echotrail.io/
+author:
+  - FalconForce
+  - Linus
+date: 05.06.2024
+modified: 05.06.2024
+tags:
+  - attack.masquerading
+  - attack.t1036.005
+  - falcon.T1036-WIN-003
+  - falcon.T1036.005-WIN-001
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: low
+  kusto: |
+    let ProcessRelations=datatable(ImageFile:string,ExpectedParent:dynamic) [
+        "smss.exe", dynamic(["smss.exe", "ntoskrnl.exe", ""]),
+        "crmss.exe", dynamic(["smss.exe"]),
+        "wininit.exe", dynamic(["smss.exe"]),
+        "winlogon.exe", dynamic(["smss.exe"]),
+        "services.exe", dynamic(["wininit.exe"]),
+        "lsaiso.exe", dynamic(["wininit.exe"]),
+        "lsass.exe", dynamic(["wininit.exe"]),
+        "spoolsv.exe", dynamic(["services.exe"]),
+        "dllhost.exe", dynamic(["svchost.exe", "services.exe"]),
+        "lsm.exe", dynamic(["wininit.exe"]),
+        "svchost.exe", dynamic(["services.exe", "msmpeng.exe"]),
+        "runtimebroker.exe", dynamic(["svchost.exe"]),
+        "taskhostw.exe", dynamic(["svchost.exe"]),
+        "userinit.exe", dynamic(["winlogon.exe"])
+        // Explorer can have a lot of parents in some environments
+        //,"explorer.exe", dynamic(["userinit.exe"])
+    ];
+    DeviceProcessEvents
+    | where Timestamp > ago(1d)
+    | extend ImageFile = tostring(tolower(parse_path(tostring(FolderPath)).Filename))
+    | where isnotempty(InitiatingProcessFolderPath)
+    | extend ParentFile = tostring(tolower(parse_path(tostring(InitiatingProcessFolderPath)).Filename))
+    //| project Timestamp, ImageFile, ParentFile
+    | lookup kind=inner ProcessRelations on ImageFile
+    | where not(set_has_element(ExpectedParent,ParentFile))
+    //| summarize count() by ImageFile, ParentFile
+    | summarize count=count(), expected_parents=make_set(ExpectedParent) by DeviceName,ActionType,ImageFile,ParentFile,FolderPath,SHA1,SHA256,InitiatingProcessSHA1,InitiatingProcessSHA256,InitiatingProcessMD5,InitiatingProcessFileName,InitiatingProcessCommandLine,InitiatingProcessFolderPath,InitiatingProcessParentFileName
+    | project-reorder ImageFile, ParentFile, expected_parents
+falsepositives:
+  - Unknown
+level: medium

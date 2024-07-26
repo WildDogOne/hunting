@@ -1,0 +1,64 @@
+title: LSASS Dumping using Debug Privileges
+id: 220ab24a-3d5e-4a6e-8494-61d41124cf88
+status: test
+description: |
+  Attackers can extract credentials from LSASS memory by performing a memory dump of the LSASS process.
+  Many methods of dumping LSASS memory require the SeDebugPrivilege privilege and use the WriteMiniDump function which opens the targeted process using PROCESS_ALL_ACCESS permissions.
+references:
+  - https://github.com/FalconForceTeam/FalconFriday/blob/master/Credential%20Access/T1003.001-WIN.md
+  - https://downloads.volatilityfoundation.org//omfw/2012/OMFW2012_Gurkok.pdf
+  - https://github.com/bleedx-93/NihilistGuy
+  - https://medium.com/falconforce/falconfriday-detecting-lsass-dumping-with-debug-privileges-0xff1f-328fdb78f5be
+author:
+  - FalconForce
+date: 2024/06/05
+modified: 2024/07/17
+tags:
+  - attack.credential_access
+  - attack.execution
+  - attack.t1003
+  - attack.t1106
+  - falcon.T1003.001-WIN
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: high
+  kusto: |
+    let timeframe = 30d;
+    let SeDebugPrivilege = binary_shift_left(1, 20); // Value for SeDebugPrivilege is 2**20 = 0x100000.
+    let sha256_whitelist = dynamic([]);
+    let LSASSOpen=materialize (
+    DeviceEvents
+    | where ingestion_time() >= ago(timeframe)
+    | where ActionType == "OpenProcessApiCall"
+    | where FileName =~ "lsass.exe"
+    | extend AccessRights=parse_json(AdditionalFields).DesiredAccess
+    | where AccessRights == 0x1fffff // PROCESS_ALL_ACCESS
+    | summarize by DeviceId, InitiatingProcessId, InitiatingProcessSHA1
+    );
+    DeviceEvents
+    | where ingestion_time() >= ago(timeframe)
+    | where ActionType == "ProcessPrimaryTokenModified"
+    // Look for processes that request debug privilege that also opened LSASS
+    | where InitiatingProcessSHA1 in ((LSASSOpen | project InitiatingProcessSHA1)) // speeds up the query
+    | join kind=inner LSASSOpen on DeviceId, InitiatingProcessSHA1, InitiatingProcessId
+    // Check that debug privilege is enabled
+    | extend AdditionalFields=parse_json(AdditionalFields)
+    | extend CurrentTokenPrivEnabled = toint(AdditionalFields.CurrentTokenPrivEnabled)
+    | extend OriginalTokenPrivEnabled = toint(AdditionalFields.OriginalTokenPrivEnabled)
+    // Value for SeDebugPrivilege is 2**20 = 0x100000.
+    // Refer to https://downloads.volatilityfoundation.org//omfw/2012/OMFW2012_Gurkok.pdf for numeric values for privileges.
+    | extend DebugPrivCurrent = binary_and(CurrentTokenPrivEnabled,SeDebugPrivilege) == SeDebugPrivilege
+    | extend DebugPrivOrig = binary_and(OriginalTokenPrivEnabled,SeDebugPrivilege) == SeDebugPrivilege
+    // Check for processes that have debug privilege after the event but did not have it before.
+    | where not(DebugPrivOrig) and DebugPrivCurrent
+    | project-reorder Timestamp, InitiatingProcessFileName
+    | summarize count=count() by DeviceName, InitiatingProcessFileName, InitiatingProcessCommandLine, ActionType, InitiatingProcessFolderPath, InitiatingProcessSHA1
+    | invoke FileProfile(InitiatingProcessSHA1, 1000)
+    | where Signer != "AO Kaspersky Lab"
+    | where not(SHA256 has_any(sha256_whitelist))
+    | where not(InitiatingProcessFileName == "stinger64.exe" and SignatureState == "SignedValid" and Signer == "MUSARUBRA US LLC")
+    | where not(GlobalPrevalence > 10000 and InitiatingProcessFileName contains "procmon") // Maybe you don't want to exclude Procmon
+falsepositives:
+  - There are some applications that perform these actions for legitimate purposes, one example is Procmon by Sysinternals.
+level: medium

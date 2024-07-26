@@ -1,0 +1,35 @@
+title: Privileged Group Added to Account
+id: d13ec237-870b-4d4f-bb72-24db238e50ac
+status: test
+description: |
+  It is prudent to monitor for changes to privileged groups, such as Domain Admins, Enterprise Admins, Account Operators, DnsAdmins, etc.
+  This query looks for changes to group membership that involve privileged groups.
+author:
+  - Linus
+date: 2024/07/05
+modified: 2024/07/05
+tags:
+  - attack.privilegeescalation
+  - attack.t1098
+logsource:
+  product: microsoft defender for identity
+detection:
+  load: low
+  kusto: |
+    let PrivilegedGroups = dynamic(["Domain Admins",
+                                    "Enterprise Admins",
+                                    "Schema Admins",
+                                    "Account Operators",
+                                    "Backup Operators"
+                                    "DnsAdmins",
+                                    "AdminSDHolder",
+                                    "Exchange Windows Permissions",
+                                    "Print Operators",
+                                    "Remote Desktop Users"]);
+    IdentityDirectoryEvents 
+    | where ActionType == "Group Membership changed"
+    | extend Group = tostring(AdditionalFields["FROM.GROUP"])
+    | where Group in (PrivilegedGroups)
+falsepositives:
+  - Unknown
+level: medium

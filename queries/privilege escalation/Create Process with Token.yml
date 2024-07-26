@@ -1,0 +1,46 @@
+title: Create Process with Token
+id: 9ede6d0c-227d-4630-9abb-4ab0d37c6597
+status: test
+description: |
+  This rule detects the use of the runas command and checks whether the account used to elevate privileges isn't the users own admin account.
+  Additionally it will match this event to the logon events to check wether it has been successful as well as augment the event with the new SID.
+author:
+  - FalconForce
+  - Linus
+references:
+  - https://github.com/FalconForceTeam/FalconFriday/blob/master/Privilege%20Escalation/T1134.002-WIN-001.md
+date: 2024/07/05
+modified: 2024/07/05
+tags:
+  - attack.privilege_escalation
+  - attack.t1134.002
+  - falcon.T1134.002-WIN-001
+logsource:
+  product: microsoft defender for identity
+detection:
+  load: low
+  kusto: |
+    let RunAsProcess=DeviceProcessEvents
+        | where Timestamp > ago(7d)
+        | where FileName =~ "runas.exe"
+        // de-obfuscate the commandline used
+        | extend CleanProcessCommandLine=parse_command_line(tostring(ProcessCommandLine), "windows")
+        // extract the username for the elevation action
+        | extend ElevatedAccountName=extract("user:([a-zA-Z0-9\\\\]+)",1,tostring(CleanProcessCommandLine))
+        | where CleanProcessCommandLine !contains strcat(AccountName, "admin")
+        // strip the domain suffix
+        | extend CleanElevatedAccountName= trim("(.*\\\\)",ElevatedAccountName)
+        // Make sure the original AccountName is not the same as the Runas Account FileName
+        | where AccountName != CleanElevatedAccountName;
+    RunAsProcess
+    | join kind=inner (
+        DeviceLogonEvents
+        | project-rename CleanElevatedAccountName = AccountName
+        // Only Check for Admin Elevation
+        // | where IsLocalAdmin == 1
+        ) on CleanElevatedAccountName,DeviceId
+    | project-rename ElevatedActionType=ActionType1,ElevatedAccountSid=AccountSid1
+    | summarize CleanProcessCommandLine = make_set(CleanProcessCommandLine) by bin(Timestamp, 1d),DeviceName,FileName,FolderPath,ProcessCommandLine,SHA256,ProcessIntegrityLevel,AccountDomain,AccountName,AccountSid, LogonId, InitiatingProcessFileName,InitiatingProcessFolderPath,InitiatingProcessCommandLine,ElevatedAccountName,CleanElevatedAccountName,ElevatedActionType,LogonType,ElevatedAccountSid,IsLocalAdmin
+falsepositives:
+  - Unknown
+level: medium

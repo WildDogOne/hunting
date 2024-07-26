@@ -1,0 +1,39 @@
+title: Process injection via NtAllocateVirtualMemoryRemote by rare or unsigned processes
+id: 32134c30-373c-4aee-afda-4c3d5cdd4b1d
+status: test
+description: |
+  The query searches for unsigned processes with a low GlobalPrevalence that inject into other processes.
+  This technique is commonly used by multiple attacker toolkits.
+author:
+  - FalconForce
+references:
+  - https://github.com/FalconForceTeam/FalconFriday/blob/master/Privilege%20Escalation/T1055.002-WIN-001.md
+date: 2024/07/05
+modified: 2024/07/05
+tags:
+  - attack.privilege_escalation
+  - attack.t1055.002
+  - falcon.T1055.002-WIN-001
+logsource:
+  product: microsoft defender for identity
+detection:
+  load: low
+  kusto: |
+    let timeframe = (24h);
+    let remoteAlloc = DeviceEvents
+    | where Timestamp > ago(timeframe)
+    | where ActionType == "NtAllocateVirtualMemoryRemoteApiCall"
+    | where InitiatingProcessFileName !~ FileName
+    | where not(isempty(InitiatingProcessSHA1))
+    | summarize count(), make_set(InitiatingProcessFileName) ,make_set(FileName) by InitiatingProcessSHA1
+    | invoke FileProfile(InitiatingProcessSHA1, 1000)
+    | where (GlobalPrevalence <= 200 or isempty(GlobalPrevalence)) and IsCertificateValid != 1;
+    DeviceEvents
+    | where Timestamp > ago(timeframe)
+    | where InitiatingProcessSHA1 in ((remoteAlloc | project InitiatingProcessSHA1)) and ActionType == "NtAllocateVirtualMemoryRemoteApiCall"
+    | join kind=leftouter remoteAlloc on InitiatingProcessSHA1
+    | summarize count() by FileName,InitiatingProcessFolderPath, InitiatingProcessSHA256,InitiatingProcessCommandLine, InitiatingProcessAccountName, InitiatingProcessVersionInfoProductName, InitiatingProcessVersionInfoOriginalFileName
+    // Customer specific tuning
+falsepositives:
+  - Unknown
+level: medium

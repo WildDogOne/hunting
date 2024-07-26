@@ -1,0 +1,42 @@
+title: User-Execution - Started Untrusted Binaries
+id: acca0a82-65d1-45d9-b7af-67049a59dff4
+status: test
+description: |
+    Malicious (office) files is an technique where users are tricked to open a file controlled by an attacker, which in turn triggers code execution on the victims system.
+    A well known examples are various forms of office macros which in turn try to run other binaries (like lolbins) or inject code into other processes in order to gain code execution.
+references:
+    - https://github.com/FalconForceTeam/FalconFriday/blob/9cb56ec1a302f2ce9630d27cd8cab5b8688ee259/Execution/T1204-WIN-001.md
+author:
+    - FalconForce
+date: 05.06.2024
+modified: 05.06.2024
+tags:
+    - attack.execution
+    - attack.t1204
+logsource:
+    product: microsoft defender for endpoint
+detection:
+    load: low
+    kusto: |
+        let lolbins = dynamic(["At.exe", "Atbroker.exe", "Bash.exe", "Bitsadmin.exe", "CertReq.exe", "Certutil.exe", "Cmd.exe", "Cmdkey.exe", "Cmstp.exe", "Control.exe", "Csc.exe", "Cscript.exe", "Desktopimgdownldr.exe", "Dfsvc.exe", "Diantz.exe", "Diskshadow.exe", "Dnscmd.exe", "Esentutl.exe", "Eventvwr.exe", "Expand.exe", "Extexport.exe", "Extrac32.exe", "Findstr.exe", "Forfiles.exe", "Ftp.exe", "GfxDownloadWrapper.exe", "Gpscript.exe", "Hh.exe", "Ie4uinit.exe", "Ieexec.exe", "Ilasm.exe", "Infdefaultinstall.exe", "Installutil.exe", "Jsc.exe", "Makecab.exe", "Mavinject.exe", "Microsoft.Workflow.Compiler.exe", "Mmc.exe", "MpCmdRun.exe", "Msbuild.exe", "Msconfig.exe", "Msdt.exe", "Mshta.exe", "Msiexec.exe", "Netsh.exe", "Odbcconf.exe", "Pcalua.exe", "Pcwrun.exe", "Pktmon.exe", "Presentationhost.exe", "Print.exe", "Psr.exe", "Rasautou.exe", "Reg.exe", "Regasm.exe", "Regedit.exe", "Regini.exe", "Register-cimprovider.exe", "Regsvcs.exe", "Regsvr32.exe", "Replace.exe", "Rpcping.exe", "Rundll32.exe", "Runonce.exe", "Runscripthelper.exe", "Sc.exe", "Schtasks.exe", "Scriptrunner.exe", "SyncAppvPublishingServer.exe", "Ttdinject.exe", "Tttracer.exe", "vbc.exe", "Verclsid.exe", "Wab.exe", "Wmic.exe", "Wscript.exe", "Wsreset.exe", "Xwizard.exe", "AgentExecutor.exe", "Appvlp.exe", "Bginfo.exe", "Cdb.exe", "csi.exe", "Devtoolslauncher.exe", "dnx.exe", "Dotnet.exe", "Dxcap.exe", "Excel.exe", "Mftrace.exe", "Msdeploy.exe", "msxsl.exe", "ntdsutil.exe", "Powerpnt.exe", "rcsi.exe", "Sqldumper.exe", "Sqlps.exe", "SQLToolsPS.exe", "Squirrel.exe", "te.exe", "Tracker.exe", "Update.exe", "vsjitdebugger.exe", "Winword.exe", "Wsl.exe"]);
+        DeviceImageLoadEvents
+        | where FileName in~ ("mscoree.dll", "mscorlib.dll", "mscorlib.ni.dll") and InitiatingProcessFileName in~ ("winword.exe", "excel.exe", "powerpnt.exe")
+            and InitiatingProcessCommandLine has_any (".doc", ".wbk", ".docm", ".dot", ".dotm" ".xls", ".xlsm", ".xltm", ".xla",".xll", ".xlam", ".ppt", ".pptm", ".pot", ".potm", ".ppsm", ".sldm") and not(InitiatingProcessCommandLine has_any (".docx", "dotx",".xlsx", ".xltx", ".pptx"))
+        | extend InitiatingProcessFileName=tolower(InitiatingProcessFileName)
+        | summarize by DeviceId, InitiatingProcessId, InitiatingProcessFileName
+        //the extra where inside DeviceProcessEvents is not necessary, but speeds up the join by A LOT!
+        | join kind=inner hint.strategy=broadcast (
+            DeviceProcessEvents 
+            | where InitiatingProcessFileName in~ ("winword.exe", "excel.exe", "powerpnt.exe") and FileName !in~ ("winword.exe", "excel.exe", "powerpnt.exe")
+            | extend InitiatingProcessFileName=tolower(InitiatingProcessFileName)
+        ) on DeviceId, InitiatingProcessFileName, InitiatingProcessId
+        | where not(isempty(FileName))
+        | invoke FileProfile("SHA1", 1000) 
+        | where FileName in~(lolbins) or (  //Always show lolbins
+            not (IsCertificateValid and IsRootSignerMicrosoft) //Do not show signed MS binaries
+            and not (GlobalPrevalence >= 500 and IsCertificateValid) //Do not show other signed binaries with a reasonable prevalence
+            ) //otherwise show the binaries (everything that isn't signed, or has low rep)
+falsepositives:
+    - There are legitimate reasons an office application may call a lolbin. Rundll32.exe for printers and csc.exe for defender tasks come to mind.
+    - Some management & installation scripts use vbs/jscript files for legit purposes.
+level: medium

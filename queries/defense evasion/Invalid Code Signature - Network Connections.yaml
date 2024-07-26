@@ -1,0 +1,56 @@
+title: Invalid Code Signature - Network Connections
+id: dae7edd2-cda8-4803-ac8b-c0664a1e31fd
+status: test
+description: |
+    This detection looks at network connections towards non-RFC-1918 IP addresses. Next it queries all the signature of all binaries that are either unsigned of where the signature is untrusted. These two sets are joined and the result is connections by binaries with unsigned or untrusted certificates
+references:
+    - https://github.com/FalconForceTeam/FalconFriday/blob/master/Defense%20Evasion/T1036-WIN-001.md
+author:
+    - FalconForce
+    - Linus
+date: 05.06.2024
+modified: 05.06.2024
+tags:
+    - attack.defense_evasion
+    - attack.t1036.001
+    - falcon.T1036-WIN-001
+logsource:
+    product: microsoft defender for endpoint
+detection:
+    load: high
+    kusto: |
+        let whitelist_folderpath = dynamic(["c:\\program files\\oracle\\virtualbox\\virtualboxvm.exe"]);
+        // set timeframe, default is 1day to allow for large environments, in smaller sets (<5K endpoints) you could extend this
+        let TimeFrame = ago(1d);
+        // get processes calling outbound to the internet
+        let networkConnections =
+        DeviceNetworkEvents
+        // Filter whitelists
+        | where not(InitiatingProcessFolderPath in~ (whitelist_folderpath))
+        // filter all RCF-1918 address space
+        | where not(ipv4_is_match(RemoteIP, '192.168.0.0/16') or ipv4_is_match(RemoteIP, '172.16.0.0/12') or ipv4_is_match(RemoteIP, '10.0.0.0/8') or ipv4_is_match(RemoteIP, '{{company_ip_cidr}}')) and Timestamp > TimeFrame
+        // skipping system processes
+        and InitiatingProcessId !in (0, 4)
+        // only established connections
+        and ActionType == "ConnectionSuccess"
+        // rename hash field to allow for later joining
+        | project-rename SHA1 = InitiatingProcessSHA1
+        | project Timestamp,DeviceName,DeviceId,InitiatingProcessFileName,InitiatingProcessFolderPath, InitiatingProcessCommandLine ,InitiatingProcessId, RemoteIP, RemoteUrl, SHA1;
+        // get binaries that are not signed or binaries of which the certificateState is untrusted
+        let certificateState =
+        DeviceFileCertificateInfo
+        | where Timestamp >= TimeFrame
+        | where IsSigned == 0 or IsTrusted == 0
+        | project DeviceId, SHA1;
+        // join the connections to the internet and let the ones remain with questionable certificate certificateState
+        let unsignedConnections =
+        networkConnections
+        | join kind=leftsemi (certificateState) on DeviceId,SHA1;
+        // query results
+        unsignedConnections
+        | extend location = geo_info_from_ip_address(tostring(RemoteIP))
+        | extend country = tostring(location["country"])
+        | summarize make_set(RemoteIP), make_set(RemoteUrl) by DeviceName, InitiatingProcessFileName, InitiatingProcessFolderPath, InitiatingProcessCommandLine, country
+falsepositives:
+    - Unknown
+level: medium

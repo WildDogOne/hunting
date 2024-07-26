@@ -1,0 +1,35 @@
+title: DHCP Spoofing Search Domain
+id: 747dbce6-751b-46d2-a6bf-c5c337e9b166
+status: test
+description: |
+  Attackers can perform a DHCP spoofing attack to redirect traffic to a malicious server.
+  This policy tries to detect a rogue DHCP by checking for infrequent DHCP domain.
+references:
+  - https://github.com/Sergio-Albea-Git/-Defender-XDR-/blob/main/KQL%20Queries/Network%20Threats/non-familiar%20DHCPDomains%20configured%20in%20our%20devices.md
+author:
+  - Linus
+date: 2024/07/05
+modified: 2024/07/05
+tags:
+  - attack.credential_access
+  - attack.t1557.003
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: low
+  kusto: |
+    let timeframe = 1d;
+    let known_domains = DeviceRegistryEvents
+    | where Timestamp between (ago(30d) .. ago(timeframe))
+    | where RegistryKey contains "tcpip"
+    | where RegistryValueName contains "dhcpdomain"
+    | summarize count=count() by RegistryValueData;
+    DeviceRegistryEvents
+    | where Timestamp between (ago(timeframe) .. now())
+    | where RegistryKey contains "tcpip"
+    | where RegistryValueName contains "dhcpdomain"
+    | join kind=anti known_domains on RegistryValueData
+    | summarize by RegistryValueData
+falsepositives:
+  - There are some applications that perform these actions for legitimate purposes, one example is Procmon by Sysinternals.
+level: medium

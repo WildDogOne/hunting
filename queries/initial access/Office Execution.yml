@@ -1,0 +1,35 @@
+title: Office Execution
+id: 4f4e5383-5ee8-4f90-afbc-5746347ab6c8
+status: test
+description: |
+  The query looks for office applications which spawn a child process and have a browser as the parent of that office application.
+references:
+  - https://github.com/FalconForceTeam/FalconFriday/blob/master/Initial%20Access/T1566-WIN-001.md
+author:
+  - FalconForce
+date: 06.06.2024
+modified: 06.06.2024
+tags:
+  - attack.????
+  - attack.t???
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: low
+  kusto: |
+    let browsers = dynamic(["iexplore.exe", "chrome.exe", "firefox.exe", "msedge.exe"]); //customize this list for your environment
+        let officeApps = dynamic(["winword.exe", "excel.exe", "powerpnt.exe"]); //consider adding other office applications such as publisher, visio and access. 
+        //this is a whitelist of the most common child processes. This is a quick and dirty solution. Consider whitelisting the full process path instead of filename
+        //also make this list as short as possible. Remove anything from this list if it doesn't occur in your organization. 
+        let whitelist = dynamic(["MSOSYNC.exe", "splwow64.exe", "csc.exe", "outlook.exe", "AcroRd32.exe", "Acrobat.exe", "explorer.exe", "DW20.exe", 
+        "Microsoft.Mashup.Container.Loader.exe", "Microsoft.Mashup.Container.NetFX40.exe", "WerFault.exe", "CLVIEW.exe", "ai.exe", "AcroTray.exe"]); 
+        DeviceProcessEvents
+        | where InitiatingProcessParentFileName in~ (browsers) and InitiatingProcessFileName in~ (officeApps) and 
+        FileName !in~ (officeApps) and FileName !in~ (browsers) and FileName !in~ (whitelist)
+        //| where FileName !in~ ("msedgewebview2.exe")
+        | invoke FileProfile(SHA1, 1000)
+        | where GlobalPrevalence < 1000 // Quick Whitelist
+        | project-rename ProcessStart_Timestamp = Timestamp
+falsepositives:
+  - N/A
+level: medium

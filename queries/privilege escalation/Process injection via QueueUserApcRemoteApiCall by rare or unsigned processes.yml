@@ -1,0 +1,36 @@
+title: Process injection via QueueUserApcRemoteApiCall by rare or unsigned processes
+id: b61d805a-fdfe-4658-8bf1-d72f5e56ac78
+status: test
+description: |
+  ​The query searches for unsigned processes with a low GlobalPrevalence that inject into other processes.
+  This technique is commonly used by multiple attacker toolkits.
+author:
+  - FalconForce
+references:
+  - https://github.com/FalconForceTeam/FalconFriday/blob/master/Privilege%20Escalation/T1055.002-WIN-002.md
+date: 2024/07/05
+modified: 2024/07/05
+tags:
+  - attack.privilege_escalation
+  - attack.t1055.002
+  - falcon.T1055.002-WIN-002
+logsource:
+  product: microsoft defender for identity
+detection:
+  load: low
+  kusto: |
+    let timeframe = (24h);
+    let QueueUserApcRemote = DeviceEvents
+    | where Timestamp > ago(timeframe)
+    | where ActionType == "QueueUserApcRemoteApiCall"
+    | distinct InitiatingProcessSHA1
+    | invoke FileProfile(InitiatingProcessSHA1, 1000)
+    | where GlobalPrevalence < 1000 or isempty(GlobalPrevalence) or SoftwareName startswith "Microsoft Office";
+    DeviceEvents
+    | where Timestamp > ago(timeframe)
+    | where InitiatingProcessSHA1 in~ ((QueueUserApcRemote | project InitiatingProcessSHA1))
+    | join kind=leftouter QueueUserApcRemote on InitiatingProcessSHA1
+    // Customer tuning
+falsepositives:
+  - Unknown
+level: medium

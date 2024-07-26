@@ -1,0 +1,91 @@
+title: Suspicious MSC File Launched
+id: 65b1406e-e1ef-43de-b9a0-63d5a5504fbe
+status: test
+description: |
+    The query searches for suspicious MSC files that are launched on the system.
+    The following types of suspicious files are detected: MSC files downloaded by web browsers, MSC files in the Downloads folder, MSC files extracted from ZIP files, and MSC files with Mark Of The Web (MOTW).
+references:
+    - https://github.com/FalconForceTeam/FalconFriday/blob/9cb56ec1a302f2ce9630d27cd8cab5b8688ee259/Initial%20Access/0xFF-0545-Suspicious_MSC_File_Launched-Win.md
+author:
+    - FalconForce
+date: 2024/07/05
+modified: 2024/07/05
+tags:
+    - attack.initialaccess
+    - attack.defenseevasion
+    - attack.t1218
+    - attack.t1566
+    - falcon.0xFF-0545-Suspicious_MSC_File_Launched-Win
+logsource:
+    product: microsoft defender for endpoint
+detection:
+    load: medium
+    kusto: |
+        let timeframe = 1d;
+        let RegexValidateTempZipPath = @"((?i)[^=|\/]*?AppData\\Local\\Temp\\(7z.........\\|wz....\\|Temp\d{1,3}_\w+)\b[^( ;)|]*)";
+        let MscRenamedFromCrDownload=(
+            DeviceFileEvents
+            | where ingestion_time() >= ago(timeframe)
+            | where ActionType == "FileRenamed"
+            | where FileName endswith ".msc"
+            | where PreviousFileName endswith ".crdownload"
+            | extend SuspiciousReason="MSC file downloaded by web browser."
+        );
+        let MscWrittenByBrowser=(
+            DeviceFileEvents
+            | where ingestion_time() >= ago(timeframe)
+            | where ActionType == "FileRenamed" or ActionType == "FileCreated"
+            | where FileName endswith ".msc"
+            | where InitiatingProcessFileName in~ ("chrome.exe", "msedge.exe", "brave.exe", "opera.exe", "vivaldi.exe", "iexplore.exe", "msedgewebview2.exe", "firefox.exe")
+            | extend SuspiciousReason="MSC file downloaded by web browser."
+        );
+        let MscInDownloadsFolder=(
+            DeviceFileEvents
+            | where ingestion_time() >= ago(timeframe)
+            | where ActionType == "FileRenamed" or ActionType == "FileCreated"
+            | where FileName endswith ".msc"
+            | where FolderPath contains @"\downloads\"
+            | extend SuspiciousReason="MSC file downloaded by web browser."
+        );
+        let MscDecompressed=(
+            DeviceFileEvents
+            | where ingestion_time() >= ago(timeframe)
+            | where ActionType == "FileRenamed" or ActionType == "FileCreated"
+            | where FileName endswith ".msc"
+            | where InitiatingProcessFileName in~ ("7zfm.exe", "7zg.exe", "7z.exe", "winzip64.exe", "winrar.exe", "winzip.exe")
+            or FolderPath matches regex RegexValidateTempZipPath
+            or FolderPath contains @".zip\"
+            | extend SuspiciousReason="MSC file extracted from zip file."
+        );
+        let MscMOTW=(
+            DeviceFileEvents
+            | where ingestion_time() >= ago(timeframe)
+            | where ActionType == "FileRenamed" or ActionType == "FileCreated"
+            | where FileName endswith ".msc"
+            | where isnotempty(FileOriginUrl)
+            | extend SuspiciousReason="MSC file with Mark Of The Web (MOTW)."
+        );
+        let SuspiciousMscFiles=(
+            union MscRenamedFromCrDownload, MscWrittenByBrowser, MscInDownloadsFolder, MscDecompressed, MscMOTW
+            | distinct FolderPath=tolower(FolderPath), DeviceId, FileOriginUrl, MscSHA1=SHA1, SuspiciousReason, MscCreatedBy=InitiatingProcessFolderPath, MscCreatedByCommandLine=InitiatingProcessCommandLine
+        );
+        DeviceProcessEvents
+        | where ingestion_time() >= ago(timeframe)
+        | where ActionType == "ProcessCreated"
+        | where FileName =~ "mmc.exe"
+        | extend ParsedCommandLine=parse_command_line(ProcessCommandLine, "windows")
+        // Look for process creations of mmc.exe where the .msc file is on the command-line, indicating that the user clicked on the .msc file.
+        | where tostring(ParsedCommandLine) contains ".msc"
+        // When a .msc file is opened in MMC, the file path is passed as an argument to MMC.
+        // Based on testing this is the first argument in the command line. In some cases a command-line switch /32 is passed as the first argument
+        // and the file path is the second argument. This is handled by the iif statement below.
+        | extend MscFile=ParsedCommandLine[1]
+        | extend MscFile=iif(MscFile startswith "/", ParsedCommandLine[2], MscFile)
+        | extend MscFile=tolower(MscFile)
+        | lookup kind=inner SuspiciousMscFiles on DeviceId, $left.MscFile == $right.FolderPath
+        | project-reorder Timestamp, DeviceId, DeviceName, SuspiciousReason, MscFile,  MscCreatedBy, MscCreatedByCommandLine, MscSHA1
+        // Begin environment-specific filter.
+        // End environment-specific filter.
+falsepositives:
+    - Administrators might share MSC files using SharePoint or other file sharing services. These might have to by filtered out.
+level: medium

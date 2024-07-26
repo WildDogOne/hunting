@@ -1,0 +1,45 @@
+title: Sharphound LDAP Discovery
+id: 1377687c-c326-44b5-ab1d-365b172e9d95
+status: test
+description: |
+  This query is designed to hunt for common Sharphound query parts.
+references:
+  - https://www.secureworks.com/blog/sniffing-out-sharphound-on-its-hunt-for-domain-admin
+  - https://github.com/vadim-hunter/Detection-Ideas-Rules/blob/main/Tools/BloodHound.yaml
+author:
+  - Linus
+date: 2024/07/25
+modified: 2024/07/25
+tags:
+  - attack.discovery
+  - attack.t1482
+  - attack.t1087
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: low
+  kusto: |
+    IdentityQueryEvents
+    | where Timestamp > ago(30d)
+    | extend search_filter = tostring(parse_json(AdditionalFields["SearchFilter"]))
+    | where isnotempty(search_filter)
+    | where search_filter contains "flags=*" or
+        search_filter contains "gpcfilesyspath=*" or
+        search_filter contains "serviceprincipalname=*" or
+        search_filter contains "objectclass=organizationalUnit" or
+        search_filter contains "objectclass=container" or
+        search_filter contains "objectclass=trusteddomain" or
+        search_filter contains "primarygroupid=*" or
+        search_filter contains "UserAccountControl:" or
+        search_filter contains "268435456" or
+        search_filter contains "268435457" or
+        search_filter contains "536870912" or
+        search_filter contains "536870913" or
+        search_filter contains "805306369" or
+        search_filter contains "805306368"
+    | summarize count=count(), search_filters = make_set(search_filter) by DeviceName
+    | extend search_filter_unique_count = array_length(search_filters)
+    | order by search_filter_unique_count desc
+falsepositives:
+  - None expected
+level: medium

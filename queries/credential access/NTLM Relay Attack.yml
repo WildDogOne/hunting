@@ -1,0 +1,72 @@
+title: NTLM Relay Attack
+id: d2883566-516f-42b5-8d82-b48b10aa7c93
+status: test
+description: |
+  NTLM relay attacks can be used by an attacker to authenticate to a system by relaying NTLM credentials that are taken from a different system.
+  In an NTLM relay attack three machines are involved: the initiator, the attacker and the target.
+  The initiator initiates an NTLM session to the attacker, the attacker then relays the NTLM authentication information to the target.
+references:
+  - https://github.com/FalconForceTeam/FalconFriday/blob/master/Credential%20Access/T1557.001-WIN.md
+  - https://github.com/Cyb3r-Monk/Threat-Hunting-and-Detection/blob/main/Credential%20Access/Potentially%20Relayed%20NTLM%20Authentication%20-%20MDE.md
+author:
+  - FalconForce
+  - Linus
+date: 05.06.2024
+modified: 05.06.2024
+tags:
+  - attack.credential_access
+  - attack.t1557
+  - attack.t1187
+  - falcon.T1557.001-WIN
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: high
+  kusto: |
+    let timeframe = 1d;
+    let DeviceIPs=(
+    DeviceNetworkInfo
+    | where isnotempty( IPAddresses)
+    | extend ips = parse_json(IPAddresses)
+    | where array_length(ips) > 1
+    | mv-expand ips
+    | extend LocalIP = tostring(ips["IPAddress"])
+    | extend DeviceName = tolower(tostring(split(DeviceName, ".")[0]))
+    | summarize by DeviceName, LocalIP);
+    // Find potential NTLM relay attack by looking for NTLM logins from devices that are known in MDE, but are from a source IP that does not match any known IP addresses for the device.
+    let PotentialNTLMRelayLogins=materialize (
+        DeviceLogonEvents
+        | where Timestamp >= ago(timeframe)
+        | where ActionType == "LogonSuccess"
+        | where LogonType == "Network"
+        | where Protocol=="NTLM"
+        | where isnotempty(RemoteDeviceName) and isnotempty(RemoteIP)
+        | where RemoteIPType <> "Loopback"
+        | extend RemoteDeviceName=tolower(RemoteDeviceName)
+        | where RemoteDeviceName in ((DeviceIPs | project DeviceName)) // The remote device is known in MDE.
+        | join kind=leftanti DeviceIPs on $left.RemoteIP == $right.LocalIP, $left.RemoteDeviceName == $right.DeviceName // The Remote IP does not match any known IP for the device.
+        | project-reorder Timestamp, RemoteIP, RemoteDeviceName, AccountDomain, AccountName
+    );
+    // Filter the potential NTLM relay events by checking there was an outgoing SMB connection from the source device to the relay IP address.
+    DeviceNetworkEvents
+    | where Timestamp >= ago(timeframe)
+    | where RemotePort in (445, 9389)
+    | where RemoteIP in ((PotentialNTLMRelayLogins | project RemoteIP))
+    | extend ShortDeviceName=tolower(split(DeviceName,".")[0])
+    | where ShortDeviceName in ((PotentialNTLMRelayLogins | project RemoteDeviceName))
+    | lookup kind=inner PotentialNTLMRelayLogins on $left.ShortDeviceName == $right.RemoteDeviceName, $left.RemoteIP == $right.RemoteIP
+    | summarize make_set(AdditionalFields) by bin(Timestamp, 1d),
+                                            DeviceName,
+                                            RemoteDeviceName = DeviceName1,
+                                            AccountName,
+                                            DeviceId,
+                                            ActionType,
+                                            ActionType1,
+                                            Protocol1,
+                                            RemoteIP,
+                                            RemotePort,
+                                            LocalIP,
+                                            LocalPort
+falsepositives:
+  - N/A
+level: medium

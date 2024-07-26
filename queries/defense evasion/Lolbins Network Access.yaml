@@ -1,0 +1,69 @@
+title: Lolbins Network Access
+id: fa01686b-7690-4aa9-be31-10a6f83fedac
+status: test
+description: |
+    This detection Addresses LOLBAS Access to the internet.
+references:
+    - https://lolbas-project.github.io/#
+author:
+    - Linus
+date: 2024/06/05
+modified: 2024/07/15
+tags:
+    - attack.defense_evasion
+    - attack.t1036
+logsource:
+    product: microsoft defender for endpoint
+detection:
+    load: low
+    kusto: |
+        let Timeframe = 30d;
+        let HashTimeframe = 30d;
+        let lolbins = dynamic(["AppInstaller.exe",
+        "Bitsadmin.exe",
+        "CertOC.exe",
+        "CertReq.exe",
+        "Cmd.exe",
+        "cmdl32.exe",
+        "ConfigSecurityPolicy.exe",
+        "DataSvcUtil.exe",
+        "Desktopimgdownldr.exe",
+        "Diantz.exe",
+        "Esentutl.exe",
+        "Expand.exe",
+        "Extrac32.exe",
+        "Findstr.exe",
+        "Finger.exe",
+        "Hh.exe",
+        "IMEWDBLD.exe",
+        "Ieexec.exe",
+        "Installutil.exe",
+        "Ldifde.exe",
+        "Makecab.exe",
+        "Mshta.exe",
+        "Presentationhost.exe",
+        "PrintBrm.exe",
+        "Replace.exe",
+        "Xwizard.exe",
+        "Scrobj.dll",
+        "Shimgvw.dll",
+        "MsoHtmEd.exe",
+        "msxsl.exe",
+        "TestWindowRemoteAgent.exe",
+        "devtunnel.exe"]);
+        // Get all known SHA1 hashes for the lolbins from ProcessEvents and FileEvents
+        let PESha1=DeviceProcessEvents | where Timestamp > ago(HashTimeframe)| where FileName in~ (lolbins)  | where isnotempty(SHA1) | summarize sha1=make_set(SHA1);
+        let FESha1=DeviceFileEvents | where Timestamp > ago(HashTimeframe)| where PreviousFileName in~ (lolbins) or FileName in~ (lolbins)  | where isnotempty(SHA1) | summarize sha1=make_set(SHA1);
+        DeviceNetworkEvents
+        | where Timestamp > ago(Timeframe)
+        // get all executions by processes with a SHA1 hash that is or was named after one of the lolbins
+        | where InitiatingProcessSHA1 in (PESha1) or InitiatingProcessSHA1 in (FESha1) or InitiatingProcessFileName in~ (lolbins) or InitiatingProcessCommandLine in~ (lolbins)
+        | extend CleanProcessCommandLine=parse_command_line(InitiatingProcessCommandLine, "windows")
+        | summarize count = count(), RemoteUrls = make_set(RemoteUrl) by InitiatingProcessFileName, InitiatingProcessSHA1, RemoteIP, InitiatingProcessParentFileName, DeviceName, InitiatingProcessAccountName
+        | extend geo = geo_info_from_ip_address(RemoteIP)
+        | extend country = tostring(geo["country"])
+        | project-reorder InitiatingProcessFileName, InitiatingProcessSHA1, RemoteUrls, RemoteIP, country
+        | order by count desc
+falsepositives:
+    - Unknown
+level: medium

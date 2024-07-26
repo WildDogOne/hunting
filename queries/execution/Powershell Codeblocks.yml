@@ -1,0 +1,46 @@
+title: Powershell Codeblocks
+id: 91a28004-4398-40f5-ad96-e539a7936d45
+status: test
+description: |
+  This rule can be used for powershell code block hunting.
+author:
+  - Linus
+date: 2024/07/15
+modified: 2024/07/15
+tags:
+  - attack.execution
+  - attack.t1059.001
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: low
+  kusto: |
+    let keywords = dynamic([//"addinutil","appinstaller","aspnet_compiler","at","atbroker","bash","bitsadmin","certoc","certreq","certutil","cmd","cmdkey","cmdl32","cmstp","colorcpl","configsecuritypolicy","conhost","control","csc","cscript","customshellhost","datasvcutil","desktopimgdownldr","devicecredentialdeployment","dfsvc","diantz","diskshadow","dnscmd","esentutl","eventvwr","expand","explorer","extexport","extrac32","findstr","finger","fltmc","forfiles","fsutil","ftp","gpscript","hh","imewdbld","ie4uinit","iediagcmd","ieexec","ilasm","infdefaultinstall","installutil","jsc","ldifde","makecab","mavinject","microsoft.workflow.compiler","mmc","mpcmdrun","msbuild","msconfig","msdt","msedge","mshta","msiexec","netsh","odbcconf","offlinescannershell","onedrivestandaloneupdater","pcalua","pcwrun","pktmon","pnputil","presentationhost","print","printbrm","provlaunch","psr","rasautou","rdrleakdiag","reg","regasm","regedit","regini","register-cimprovider","regsvcs","regsvr32","replace","rpcping","rundll32","runexehelper","runonce","runscripthelper","sc","schtasks","scriptrunner","setres","settingsynchost","ssh","stordiag","syncappvpublishingserver","tar","ttdinject","tttracer","unregmp2","vbc","verclsid","wab","wbadmin","winget","wlrmdr","wmic","workfolders","wscript","wsreset","wuauclt","xwizard","msedge_proxy","msedgewebview2","wt",//lolbins
+                                "unrestricted",
+                                "http",
+                                "webclient",
+                                "download",
+                                "mppreference",
+                                "sockets",
+                                "bxor",
+                                ".replace",
+                                "reflection",
+                                "assembly",
+                                "load",
+                                "bits",
+                                "start-proc",
+                                "iwr",
+                                "frombase64"]);
+    DeviceEvents
+    | where Timestamp > ago(1d)
+    | where ActionType == "PowerShellCommand"
+    | extend Command = tostring(parse_json(AdditionalFields)["Command"])
+    //| project Command, InitiatingProcessCommandLine, InitiatingProcessFileName, InitiatingProcessParentFileName
+    | where tolower(Command) has_any (keywords)
+    | project-reorder Command
+    | summarize AffectedDevices = count_distinct(DeviceName) by Command, InitiatingProcessFileName, InitiatingProcessParentFileName
+    | where not(Command == "Get-MpPreference" and InitiatingProcessParentFileName == "SenseIR.exe")
+    | where not(Command == "Get-MpPreference" and InitiatingProcessParentFileName == "pycharm64.exe")
+falsepositives:
+  - Unknown
+level: low

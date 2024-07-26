@@ -1,0 +1,47 @@
+title: Certutil CLI
+id: 1c12df30-ceaf-4b17-9134-ae1cd62f6e60
+status: test
+description: |
+    This detection addresses most of the known ways to utilize this binary for malicious/unintended purposes.
+    It attempts to accomodate for most detection evasion techniques, like commandline obfuscation and binary renaming Query
+references:
+    - https://github.com/FalconForceTeam/FalconFriday/blob/master/Command%20and%20Control/T1105-WIN-001.md
+author:
+    - FalconForce
+date: 2024/06/05
+modified: 2024/06/
+tags:
+    - attack.command_and_control
+    - attack.t1105
+    - attack.t1564.004
+    - attack.t1027
+    - attack.t1140
+    - falcon.T1105-WIN-001
+logsource:
+    product: microsoft defender for endpoint
+detection:
+    load: low
+    kusto: |
+        // set the time span for the query
+        let Timeframe = 30d;
+        // set the HashTimeframe for the hash lookup, longer makes more accurate but obviously also more resource intensive
+        let HashTimeframe = 30d;
+        // Get all known SHA1 hashes for certutil executions or renamed files formerly named certutil
+        let CertUtilPESha1=DeviceProcessEvents | where Timestamp > ago(HashTimeframe)| where FileName contains "certutil"  | where isnotempty(SHA1) | summarize sha1=make_set(SHA1);
+        let CertUtilFESha1=DeviceFileEvents | where Timestamp > ago(HashTimeframe)| where PreviousFileName contains "certutil" or FileName contains "certutil"  | where isnotempty(SHA1) | summarize sha1=make_set(SHA1);
+        DeviceProcessEvents
+        | where Timestamp > ago(Timeframe)
+        // get all executions by processes with a SHA1 hash that is or was named certutil
+        | where SHA1 in (CertUtilPESha1) or SHA1 in (CertUtilFESha1) or FileName =~ "certutil.exe" or ProcessCommandLine has_any ("certutil")
+        // create a new field called CleanProcessCommandLine which gets populated with the value of ProcessCommandLine as Windows parses it for execution,
+        // removing any potential command line obfuscation
+        | extend CleanProcessCommandLine=parse_command_line(ProcessCommandLine, "windows")
+        // search for de-obfuscated commands used
+        | where CleanProcessCommandLine has_any ("decode", "encode", "verify","url")
+        // urlcache is the documented attribute, only url is also accepted
+        // verifyctl is the documented attribute, only verify is also accepted
+        | order by Timestamp
+        | project Timestamp, CleanProcessCommandLine, ProcessCommandLine, SHA1
+falsepositives:
+    - Unknown
+level: medium

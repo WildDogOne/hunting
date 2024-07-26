@@ -1,0 +1,54 @@
+title: Cobalt Named Pipes
+id: 97c85908-5b3c-42e6-a0d5-05d4dc23a540
+status: test
+description: |
+  Detects suspicious named pipe events that are associated with Cobalt Strike.
+  Cobalt Strike is a legitimate penetration testing tool that is often used by adversaries to perform post-exploitation activities.
+  Named pipes are a form of inter-process communication that can be used by adversaries to execute code, transfer files, and perform other malicious activities.
+references:
+  - https://gist.github.com/svch0stz/c3288929c0e83eacdd558190b047df6e
+  - https://medium.com/falconforce/falconfriday-suspicious-named-pipe-events-0xff1b-fe475d7ebd8
+  - https://tho-le.medium.com/threat-hunting-pivoting-via-smb-named-pipe-44f5f9b45b7b
+author:
+  - Linus
+date: 2024/07/17
+modified: 2024/07/17
+tags:
+  - attack.execution
+  - attack.defense_evasion
+  - attack.ds0023
+  - attack.t1559
+  - attack.t1055
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: high
+  kusto: |
+    let timeframe=30d;
+    DeviceEvents
+    | where Timestamp >= ago(timeframe)
+    | where ActionType == "NamedPipeEvent"
+    | extend AdditionalFields=parse_json(AdditionalFields)
+    | extend ThreadId=tostring(AdditionalFields.ThreadId)
+    | extend PipeName=tostring(AdditionalFields.PipeName)
+    | where PipeName matches regex @"MSSE-[0-9a-f]{3,4}-server" or
+            PipeName matches regex @"status_[0-9a-f]{2}" or
+            PipeName matches regex @"postex_ssh_[0-9a-f]{4}" or
+            PipeName matches regex @"msagent_[0-9a-f]{2}" or
+            PipeName matches regex @"postex_[0-9a-f]{4}" or
+            PipeName matches regex @"mojo.5688.8052.183894939787088877[0-9a-f]{2}" or
+            PipeName matches regex @"mojo.5688.8052.35780273329370473[0-9a-f]{2}" or
+            PipeName matches regex @"wkssvc[0-9a-f]{2}" or
+            PipeName matches regex @"ntsvcs[0-9a-f]{2}" or
+            PipeName matches regex @"DserNamePipe[0-9a-f]{2}" or
+            PipeName matches regex @"SearchTextHarvester[0-9a-f]{2}" or
+            PipeName matches regex @"mypipe-f[0-9a-f]{2}" or
+            PipeName matches regex @"mypipe-h[0-9a-f]{2}" or
+            PipeName matches regex @"windows.update.manager[0-9a-f]{2}" or
+            PipeName matches regex @"windows.update.manager[0-9a-f]{3}" or
+            PipeName matches regex @"ntsvcs_[0-9a-f]{2}" or
+            PipeName matches regex @"scerpc_[0-9a-f]{2}" or
+            PipeName matches regex @"scerpc[0-9a-f]{2}"
+falsepositives:
+  - N/A
+level: high
