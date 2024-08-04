@@ -1,0 +1,53 @@
+title: Obfuscated Powershell 1
+id: fd4cf9c8-4789-4884-a4b7-bb4081130d67
+status: test
+description: |
+  A first idea on how to detect obfuscated PowerShell commands.
+  This rule detects the use of obfuscated PowerShell commands by counting the number of special characters in the command line.
+  This can be a good indicator for obfuscation.
+  The threshold can be adjusted to fit the environment.
+references:
+  - https://github.com/target/Threat-Hunting/blob/master/Powershell%20Obfuscation/hunt_powershell_obfuscation.ipynb
+author:
+  - Linus
+date: 2024/08/04
+modified: 2024/08/04
+tags:
+  - attack.defense_evasion
+  - attack.t1027.010
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: medium
+  kusto: |
+    let known_powershell_hashes = DeviceProcessEvents | where Timestamp > ago(30d) | where FileName contains "powershell" | summarize by SHA1;
+    DeviceProcessEvents
+    | where Timestamp > ago(30d)
+    | where not(ProcessCommandLine startswith "powershell.exe -ExecutionPolicy AllSigned")
+    | where InitiatingProcessVersionInfoCompanyName != @"Rapid7, LLC."
+    | where InitiatingProcessFileName != @"SenseIR.exe"
+    | where InitiatingProcessParentFileName != @"SenseIR.exe"
+    | where SHA1 has_any (known_powershell_hashes)
+    | extend semicolon_count = countof(ProcessCommandLine, @";")
+    | extend doublequote_count = countof(ProcessCommandLine, "\"")
+    | extend singlequote_count = countof(ProcessCommandLine, @"'")
+    | extend backtick_count = countof(ProcessCommandLine, @"`")
+    | extend plussign_count = countof(ProcessCommandLine, @"+")
+    | extend leftbrace_count = countof(ProcessCommandLine, @"{")
+    | extend rightbrace_count = countof(ProcessCommandLine, @"}")
+    | extend leftbracket_count = countof(ProcessCommandLine, @"[")
+    | extend rightbracket_count = countof(ProcessCommandLine, @"]")
+    | extend leftparen_count = countof(ProcessCommandLine, @"(")
+    | extend rightparen_count = countof(ProcessCommandLine, @")")
+    | extend pipe_count = countof(ProcessCommandLine, @"|")
+    | extend dollarsign_count = countof(ProcessCommandLine, @"$")
+    | extend camelcases = extract_all(@"([a-z][A-Z])|([A-Z][a-z])", ProcessCommandLine)
+    | extend camelswitch_count = array_length(camelcases)
+    | project-away camelcases
+    | extend commandline = parse_command_line(ProcessCommandLine, "windows")
+    | extend count_sum = semicolon_count + doublequote_count + singlequote_count + backtick_count + plussign_count + leftbrace_count + rightbrace_count + leftbracket_count + rightbracket_count + leftparen_count + rightparen_count + pipe_count + dollarsign_count + camelswitch_count
+    | where count_sum >= 100 // This is a threshold that can be adjusted
+falsepositives:
+  - Defender for Endpoint (SenseIR.exe)
+  - Insight Agent (Rapid7, LLC.)
+level: medium
