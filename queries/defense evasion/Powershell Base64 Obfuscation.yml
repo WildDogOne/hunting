@@ -9,7 +9,7 @@ references:
 author:
   - Linus
 date: 2024/07/13
-modified: 2024/07/13
+modified: 2024/08/04
 tags:
   - attack.defense_evasion
   - attack.t1140
@@ -33,6 +33,7 @@ detection:
                             "bits",
                             "start-proc",
                             "iwr",
+                            "join"
                             "frombase64"]);
     let known_powershell_hashes = DeviceProcessEvents | where Timestamp > ago(30d) | where FileName contains "powershell" | summarize by SHA1;
     DeviceProcessEvents
@@ -44,7 +45,7 @@ detection:
     | where isnotempty(base64_data)
     | extend decoded = base64_decode_tostring(base64_data)
     | extend decoded = replace_regex(decoded, '[\\0]+', '') //Remove Unicode symbols that for some reason appear after base64 decoding
-    | where tolower(decoded) has_any (keywords)
+    | where tolower(decoded) has_any (keywords) or decoded contains "^"
 falsepositives:
   - Unknown
 level: medium
