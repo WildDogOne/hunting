@@ -23,12 +23,14 @@ detection:
     let known_powershell_hashes = DeviceProcessEvents | where Timestamp > ago(30d) | where FileName contains "powershell" | summarize by SHA1;
     DeviceProcessEvents
     | where Timestamp > ago(30d)
-    | where not(ProcessCommandLine startswith "powershell.exe -ExecutionPolicy AllSigned")
-    | where InitiatingProcessVersionInfoCompanyName != @"Rapid7, LLC."
-    | where InitiatingProcessFileName != @"SenseIR.exe"
-    | where InitiatingProcessParentFileName != @"SenseIR.exe"
+    | where not(ProcessCommandLine startswith "powershell.exe -ExecutionPolicy AllSigned") // Ignore fully signed PS
+    | where InitiatingProcessVersionInfoCompanyName != @"Rapid7, LLC." // Insight Agent
+    | where InitiatingProcessFileName != @"SenseIR.exe" // Defender for Endpoint
+    | where InitiatingProcessParentFileName != @"SenseIR.exe" // Defender for Endpoint
+    | where InitiatingProcessFileName != @"nsverctl.exe" // Citrix VPN
     | where SHA1 has_any (known_powershell_hashes)
     | extend semicolon_count = countof(ProcessCommandLine, @";")
+    | extend up_count = countof(ProcessCommandLine, @"^")
     | extend doublequote_count = countof(ProcessCommandLine, "\"")
     | extend singlequote_count = countof(ProcessCommandLine, @"'")
     | extend backtick_count = countof(ProcessCommandLine, @"`")
@@ -45,8 +47,9 @@ detection:
     | extend camelswitch_count = array_length(camelcases)
     | project-away camelcases
     | extend commandline = parse_command_line(ProcessCommandLine, "windows")
-    | extend count_sum = semicolon_count + doublequote_count + singlequote_count + backtick_count + plussign_count + leftbrace_count + rightbrace_count + leftbracket_count + rightbracket_count + leftparen_count + rightparen_count + pipe_count + dollarsign_count + camelswitch_count
-    | where count_sum >= 100 // This is a threshold that can be adjusted
+    | extend count_sum = semicolon_count + up_count + doublequote_count + singlequote_count + backtick_count + plussign_count + leftbrace_count + rightbrace_count + leftbracket_count + rightbracket_count + leftparen_count + rightparen_count + pipe_count + dollarsign_count + camelswitch_count
+    | project-reorder Timestamp, DeviceName, InitiatingProcessFileName, InitiatingProcessParentFileName, ProcessCommandLine
+    | where count_sum >= 200 // This is a threshold that can be adjusted
 falsepositives:
   - Defender for Endpoint (SenseIR.exe)
   - Insight Agent (Rapid7, LLC.)
