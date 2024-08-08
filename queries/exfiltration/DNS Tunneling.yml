@@ -1,0 +1,27 @@
+title: DNS Tunneling
+id: 4bc94aa7-74f4-4fbe-a7b2-8a1ff0dc4da3
+status: test
+description: |
+  This query detects high DNS Length from a single source, which could indicate DNS tunneling.
+  DNS tunneling is a technique used to exfiltrate data from a network by encoding the data in DNS queries and responses.
+author:
+  - Linus
+date: 2024/08/08
+modified: 2024/08/08
+tags:
+    - attack.exfiltration
+    - attack.t1048.003
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  esql: |
+    from logs-infoblox_*
+    | where dns.question.name not like "*.{{domain}}"
+    | where source.address not in ( "{{company_ns}}")
+    | stats question_length = sum(dns.question.lenght) by bucket(@timestamp, 1 minute), source.address
+    | where question_length > 300000
+    | stats bytes_transfered = sum(question_length), mbytes_transfered = sum(question_length)/1000000.0 by source.address
+    | keep source.address, bytes_transfered, mbytes_transfered
+falsepositives:
+  - DNS Servers like Infoblox or Active Directory DNS Servers
+level: medium
