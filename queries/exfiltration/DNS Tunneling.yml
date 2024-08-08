@@ -17,7 +17,7 @@ detection:
   esql: |
     from logs-infoblox_*
     | where dns.question.name not like "*.{{domain}}"
-    | where source.address not in ( "{{company_ns}}")
+    | where source.address not in ("{{company_ns}}")
     | stats question_length = sum(dns.question.lenght) by bucket(@timestamp, 1 minute), source.address
     | where question_length > 300000
     | stats bytes_transfered = sum(question_length), mbytes_transfered = sum(question_length)/1000000.0 by source.address
