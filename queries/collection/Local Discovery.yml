@@ -1,0 +1,28 @@
+title: Local Discovery
+id: c7295786-60fb-4266-9090-1ca036b8e0fe
+status: test
+description: |
+  This hunting query looks for processes that read a large number of unique files in a short period of time.
+  This could be an attacker using a tool to enumerate files on a system to scan for sensitive information.
+author:
+  - Linus
+date: 2024/08/28
+modified: 2024/08/28
+tags:
+  - attack.collection
+  - attack.t1005
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: low
+  kusto: |
+    DeviceEvents
+    | where ActionType == "SensitiveFileRead"
+    // Maybe check ProcessCreationTime vs InitiatingProcessParentCreationTime
+    | summarize count_distinct(FileName) by InitiatingProcessFileName, InitiatingProcessParentFileName, DeviceName, bin(Timestamp, 10m), InitiatingProcessSHA1
+    | where count_distinct_FileName >= 500
+    | invoke FileProfile(InitiatingProcessSHA1, 1000)
+    | order by GlobalPrevalence asc
+falsepositives:
+  - None expected
+level: medium
