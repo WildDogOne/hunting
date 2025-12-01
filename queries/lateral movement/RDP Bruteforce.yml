@@ -1,0 +1,39 @@
+title: Possible RDP Bruteforce
+id: 113d4306-5083-404b-802b-eaeef910657b
+status: test
+description: |
+  This hunting query checks for Successfull and Failed RDP Logons from the same source target combination over a specified timefram.
+references:
+  - duckduckgo
+author:
+  - Linus Läubli
+date: 01.12.2025
+modified: 01.12.2025
+tags:
+  - attack.lateral_movement
+  - attack.t1021.003
+  - falcon.T1021-WIN-002
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: low
+  kusto: |
+    let failed = DeviceLogonEvents
+    //| where Timestamp between (ago(1d) .. now())
+    | where LogonType == "Network"
+    | where ActionType == "LogonFailed"
+    | where isnotempty( RemoteDeviceName)
+    | summarize failed_count = count() by DeviceName, RemoteDeviceName, bin(Timestamp, 1h)
+    | where failed_count > 10;
+    DeviceLogonEvents
+    //| where Timestamp between (ago(1d) .. now())
+    | where LogonType == "Network"
+    | where ActionType == "LogonSuccess"
+    | summarize success_count = count() by DeviceName, AccountName, RemoteDeviceName, bin(Timestamp, 1h)
+    | join  kind=inner failed on DeviceName, RemoteDeviceName, Timestamp
+    | project-reorder DeviceName, RemoteDeviceName, AccountName, success_count, failed_count
+    | project Timestamp, DeviceName, RemoteDeviceName, AccountName, success_count, failed_count
+    | order by failed_count desc
+  falsepositives:
+    - Badly configured services, for example Veeam
+level: medium
