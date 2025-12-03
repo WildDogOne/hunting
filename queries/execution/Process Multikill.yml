@@ -1,0 +1,38 @@
+title: Process Multikill
+id: 58a99fba-89a4-4a49-8226-8cb0f708e54d
+status: test
+description: |
+  Detects if a device has many unique processed killed within a certain timeframe (1h)
+author:
+  - Linus
+date: 2025/12/03
+modified: 2025/12/03
+tags:
+  - attack.execution
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: high
+  kusto: |
+    let timeframe = 30d;
+    let stop = 
+    DeviceProcessEvents
+    | where Timestamp > ago(timeframe)
+    | where ProcessCommandLine  has_all ("stop", "net.exe") or ProcessCommandLine has_all ("sc.exe", "stop")
+    | extend ProcessCommandLine = replace_string(ProcessCommandLine,'"','')
+    | extend stop_name = extract(@"(?i)STOP\s(.*?)(\s|$)", 1, ProcessCommandLine)
+    | project-reorder ProcessCommandLine, stop_name;
+    let taskkill = DeviceProcessEvents
+    | where Timestamp > ago(timeframe)
+    | where FileName == "taskkill.exe"
+    | extend ProcessCommandLine = replace_string(ProcessCommandLine,'"','')
+    | extend stop_name = extract(@"(?i)/IM\s(.*?)(\s|$)", 1, ProcessCommandLine)
+    | project-reorder ProcessCommandLine, stop_name
+    | where isnotempty(stop_name);
+    union stop, taskkill
+    | summarize count_distinct(stop_name), make_set(stop_name) by DeviceName, bin(Timestamp, 1h)
+    | order by count_distinct_stop_name
+    | where count_distinct_stop_name > 10
+falsepositives:
+  - Support?
+level: low
