@@ -1,0 +1,32 @@
+title: Modification of multiple files
+id: 082256a6-3ad8-4982-9f2c-63d8252102d1
+status: test
+description: |
+  This rule detects if multiple files have been changed by a single process.
+  For whitelisting it also checks if the same process has been seen in violation of the LSASS process
+author:
+  - Linus
+date: 2025/12/05
+modified: 2025/12/05
+tags:
+    - attack.impact
+    - attack.t1565
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  esql: |
+    let whitelist_process = dynamic(["wolframnb.exe","svchost.exe"]);
+    let lsass = DeviceEvents
+    | where ActionType == "AsrLsassCredentialTheftBlocked"
+    | summarize by FileName, DeviceName;
+    DeviceFileEvents
+    | where ActionType == "FileModified"
+    | where not(InitiatingProcessFileName has_any (whitelist_process))
+    | where not( FolderPath contains "AppData")
+    | summarize count_distinct(FileName) by DeviceName, InitiatingProcessFileName, bin(Timestamp, 10m)
+    | join kind=inner lsass on DeviceName, $left.InitiatingProcessFileName==$right.FileName
+    | order by count_distinct_FileName desc
+    | where count_distinct_FileName > 100
+falsepositives:
+  - DNS Servers like Infoblox or Active Directory DNS Servers
+level: low
