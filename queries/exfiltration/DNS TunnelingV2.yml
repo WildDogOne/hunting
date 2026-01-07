@@ -1,0 +1,30 @@
+title: DNS Tunneling V2
+id: a5bcafc2-7d4e-4b40-b31c-fead09b77c0f
+status: test
+description: |
+  This query detects high DNS Length from a single source, which could indicate DNS tunneling.
+  DNS tunneling is a technique used to exfiltrate data from a network by encoding the data in DNS queries and responses.
+author:
+  - Linus
+date: 2026/01/07
+modified: 2026/01/07
+tags:
+    - attack.exfiltration
+    - attack.t1048.003
+logsource:
+  product: Infoblox
+detection:
+  esql: |
+    FROM logs-infoblox_nios.log-*
+    | WHERE dns.question.length IS NOT NULL
+    | WHERE dns.question.top_level_domain IS NOT NULL
+    | WHERE host.domain IN ("dns1.{{domain}}", "dns2.{{domain}}") //Only necessary if there is a split between internal and external DNS Servers
+    | WHERE ml_is_dga.malicious_prediction > 0 and ml_is_dga.malicious_probability > 0
+    | WHERE client.address NOT IN ("dns1.{{domain}}", "dns2.{{domain}}") //Ignore the Requests forwarded from an internal DNS Server to an external DNS Server, Only clients are interesting
+    | WHERE NOT ENDS_WITH(dns.question.name, ".in-addr.arpa") AND NOT ENDS_WITH(dns.question.name, "{{domain}}") AND NOT ENDS_WITH(dns.question.name, ".sophosxl.net") //Ignore sophosxl.net, sophos uses DNS Tunneling for their EDR
+    | STATS dns_sum = SUM(dns.question.length), distinct_dns_questions = COUNT_DISTINCT(dns.question.name), VALUES(dns.question.name) BY client.address
+    | WHERE distinct_dns_questions > 100
+    | SORT dns_sum DESC
+falsepositives:
+  - DNS Servers like Infoblox or Active Directory DNS Servers
+level: medium
