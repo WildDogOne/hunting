@@ -14,7 +14,7 @@ tags:
 logsource:
   product: microsoft defender for endpoint
 detection:
-  esql: |
+  kusto: |
     let whitelist_process = dynamic(["wolframnb.exe","svchost.exe"]);
     let lsass = DeviceEvents
     | where ActionType == "AsrLsassCredentialTheftBlocked"
