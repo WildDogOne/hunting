@@ -15,13 +15,13 @@ logsource:
   product: microsoft defender for endpoint
 detection:
   esql: |
-    from logs-infoblox_*
-    | where dns.question.name not like "*.{{domain}}"
-    | where client.address not in ("{{company_ns}}")
-    | stats question_length = sum(dns.question.length) by bucket(@timestamp, 1 minute), client.address
-    | where question_length > 300000
-    | stats bytes_transfered = sum(question_length), mbytes_transfered = sum(question_length)/1000000.0 by client.address
-    | keep client.address, bytes_transfered, mbytes_transfered
+      from logs-infoblox_*
+      | where dns.question.name not like "*.{{domain}}"
+      | WHERE host.domain IN ("dns1.{{domain}}", "dns2.{{domain}}") //Only necessary if there is a split between internal and external DNS Servers
+      | stats question_length = sum(dns.question.length) by bucket(@timestamp, 1 minute), client.address
+      | where question_length > 300000
+      | stats bytes_transfered = sum(question_length), mbytes_transfered = sum(question_length)/1000000.0 by client.address
+      | keep client.address, bytes_transfered, mbytes_transfered
 falsepositives:
   - DNS Servers like Infoblox or Active Directory DNS Servers
 level: medium
