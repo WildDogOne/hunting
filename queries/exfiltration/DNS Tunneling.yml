@@ -7,7 +7,7 @@ description: |
 author:
   - Linus
 date: 2024/08/08
-modified: 2024/08/08
+modified: 2026/01/15
 tags:
     - attack.exfiltration
     - attack.t1048.003
