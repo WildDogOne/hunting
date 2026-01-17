@@ -12,7 +12,6 @@ modified: 2024/07/17
 tags:
   - attack.execution
   - attack.t1047
-  - attack.t1047
 logsource:
   product: microsoft defender for endpoint
 detection:
