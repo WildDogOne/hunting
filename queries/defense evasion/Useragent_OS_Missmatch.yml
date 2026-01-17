@@ -1,0 +1,30 @@
+title: Useragent OS Missmatch
+id: 5454fb79-12d5-43fe-99f1-6dca836b5e7e
+status: test
+description: |
+  An attacker might be able to steal an access token for a particular device and use that to use Azure AD applications on another device, bypassing certain restrictions.
+author:
+  - Linus
+date: 2026/01/17
+modified: 2026/01/17
+tags:
+  - attack.defense_evading
+  - attack.t1036
+logsource:
+  product: EntraID
+detection:
+  esql: |
+    from logs-o365.audit-default
+    //| WHERE @timestamp > now() - 30 day
+    | WHERE MV_CONTAINS(event.category, "authentication")
+    | WHERE o365.audit.DeviceProperties.OS IS NOT NULL
+    | EVAL user_agent.os.full = TO_LOWER(REPLACE(user_agent.os.full, " ", ""))
+    | EVAL o365.audit.DeviceProperties.OS = TO_LOWER(REPLACE(o365.audit.DeviceProperties.OS, " ", ""))
+    | GROK user_agent.os.full "%{DATA:user_agent.os.full}\\d"
+    | GROK o365.audit.DeviceProperties.OS "%{DATA:o365.audit.DeviceProperties.OS}\\d"
+    | WHERE user_agent.os.full != o365.audit.DeviceProperties.OS
+falsepositives: |
+  Users might use a plugin to hide their true UserAgent.
+  This might lead to false positives.
+  Also, there are some applications that incorrectly report the OS in the UserAgent header, for example, Mobile Safari when using the 'request desktop site' feature.
+level: medium
