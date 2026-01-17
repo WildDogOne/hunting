@@ -15,7 +15,8 @@ logsource:
 detection:
   esql: |
     from logs-o365.audit-default
-    //| WHERE @timestamp > now() - 30 day
+    | WHERE user.domain == "{{domain}}" OR user.domain LIKE "%.onmicrosoft.com" //Can be removed
+    //| WHERE `source.geo.country_name`!="Switzerland" //For simple whitelisting
     | WHERE MV_CONTAINS(event.category, "authentication")
     | WHERE o365.audit.DeviceProperties.OS IS NOT NULL
     | EVAL user_agent.os.full = TO_LOWER(REPLACE(user_agent.os.full, " ", ""))
@@ -23,6 +24,7 @@ detection:
     | GROK user_agent.os.full "%{DATA:user_agent.os.full}\\d"
     | GROK o365.audit.DeviceProperties.OS "%{DATA:o365.audit.DeviceProperties.OS}\\d"
     | WHERE user_agent.os.full != o365.audit.DeviceProperties.OS
+    | STATS BY user.name, source.geo.country_name, user_agent.os.full, o365.audit.DeviceProperties.OS, source.geo.country_name
 falsepositives: |
   Users might use a plugin to hide their true UserAgent.
   This might lead to false positives.
