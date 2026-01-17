@@ -17,19 +17,18 @@ logsource:
 detection:
   load: medium
   kusto: |
-    let timeframe = 7d;
-    let common_clis = DeviceProcessEvents
-    | where Timestamp between (ago(30d) .. ago(timeframe))
-    | where InitiatingProcessFileName == "wmiprvse.exe" or InitiatingProcessParentFileName == "wmiprvse.exe"
-    | summarize count = count() by ProcessCommandLine
-    | where count > 50;
-    DeviceProcessEvents
-    | where Timestamp > ago(timeframe)
-    | where InitiatingProcessFileName == "wmiprvse.exe" or InitiatingProcessParentFileName == "wmiprvse.exe"
-    | extend commandline = parse_command_line(ProcessCommandLine, "windows")
-    | project-reorder commandline
-    | where not(commandline has_any (@"C:\Windows\CCM\")) // Remove CCM, not good practice I guess, but what can you do
-    | join kind=anti common_clis on ProcessCommandLine // Removes frequently seen commandlines
+    from logs-o365.audit-default
+    //| WHERE @timestamp > now() - 30 day
+    | WHERE user.domain == "{{domain}}" OR user.domain LIKE "%.onmicrosoft.com"
+    //| WHERE `source.geo.country_name`!="Switzerland"
+    | WHERE MV_CONTAINS(event.category, "authentication")
+    | WHERE o365.audit.DeviceProperties.OS IS NOT NULL
+    | EVAL user_agent.os.full = TO_LOWER(REPLACE(user_agent.os.full, " ", ""))
+    | EVAL o365.audit.DeviceProperties.OS = TO_LOWER(REPLACE(o365.audit.DeviceProperties.OS, " ", ""))
+    | GROK user_agent.os.full "%{DATA:user_agent.os.full}\\d"
+    | GROK o365.audit.DeviceProperties.OS "%{DATA:o365.audit.DeviceProperties.OS}\\d"
+    | WHERE user_agent.os.full != o365.audit.DeviceProperties.OS
+    | KEEP user.name, source.geo.country_name, user_agent.os.full, o365.audit.DeviceProperties.OS, source.geo.country_name
 falsepositives:
   - N/A
 level: medium
