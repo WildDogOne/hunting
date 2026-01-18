@@ -16,6 +16,7 @@ detection:
   esql: |
     from logs-o365.audit-default
     | WHERE user.domain == "{{domain}}" OR user.domain LIKE "%.onmicrosoft.com" //Can be removed
+    | WHERE @timestamp > now() - 30 day
     //| WHERE `source.geo.country_name`!="Switzerland" //For simple whitelisting
     | WHERE MV_CONTAINS(event.category, "authentication")
     | WHERE o365.audit.DeviceProperties.OS IS NOT NULL
