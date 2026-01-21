@@ -20,25 +20,35 @@ detection:
   load: low
   kusto: |
     IdentityQueryEvents
-    | where Timestamp > ago(30d)
     | extend search_filter = tostring(parse_json(AdditionalFields["SearchFilter"]))
     | where isnotempty(search_filter)
+    | extend source_device = tolower(AdditionalFields["FROM.DEVICE"])
+    | project DeviceName, source_device, Timestamp, search_filter
+    | extend timebin = bin(Timestamp, 10m)
+    | join kind=leftouter (DeviceEvents
+            | extend DeviceName = replace_string(tolower(DeviceName), ".zhaw.ch","")
+            | where ActionType == "LdapSearch"
+            | extend timebin = bin(Timestamp, 10m)
+            | extend search_filter = parse_json(AdditionalFields)
+            | extend search_filter = tostring(search_filter["SearchFilter"])
+            | where isnotempty(search_filter)
+            | where isnotempty( ActionType)) on $left.source_device == $right.DeviceName, timebin//, search_filter
+    //| where isnotempty(ActionType)
     | where search_filter contains "flags=*" or
-        search_filter contains "gpcfilesyspath=*" or
-        search_filter contains "serviceprincipalname=*" or
-        search_filter contains "objectclass=organizationalUnit" or
-        search_filter contains "objectclass=container" or
-        search_filter contains "objectclass=trusteddomain" or
-        search_filter contains "primarygroupid=*" or
-        search_filter contains "UserAccountControl:" or
-        search_filter contains "268435456" or
-        search_filter contains "268435457" or
-        search_filter contains "536870912" or
-        search_filter contains "536870913" or
-        search_filter contains "805306369" or
-        search_filter contains "805306368"
-    | summarize count=count(), search_filters = make_set(search_filter) by DeviceName
-    | extend search_filter_unique_count = array_length(search_filters)
+            search_filter contains "gpcfilesyspath=*" or
+            search_filter contains "serviceprincipalname=*" or
+            search_filter contains "objectclass=organizationalUnit" or
+            search_filter contains "objectclass=container" or
+            search_filter contains "objectclass=trusteddomain" or
+            search_filter contains "primarygroupid=*" or
+            search_filter contains "UserAccountControl:" or
+            search_filter contains "268435456" or
+            search_filter contains "268435457" or
+            search_filter contains "536870912" or
+            search_filter contains "536870913" or
+            search_filter contains "805306369" or
+            search_filter contains "805306368"
+    | summarize count=count(), search_filters = make_set(search_filter), related_search_filters = make_set(search_filter1), search_filter_unique_count=count_distinct(search_filter), make_set(InitiatingProcessFileName)  by source_device
     | order by search_filter_unique_count desc
 falsepositives:
   - None expected
