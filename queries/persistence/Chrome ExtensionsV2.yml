@@ -1,0 +1,36 @@
+title: Chrome ExtensionsV2
+id: 147a3c51-4a71-4716-b68f-0e0aa1912fd4
+status: test
+description: |
+  An attacker can install its own or infect a highjacked browser extension to gain persistence and control over a system.
+  Depending on the intent of the attacker he can have full control over all communication the browser has, execute new processes, have a stable command and control channel and much more.
+references:
+  - https://github.com/DebugBear/chrome-extension-list
+author:
+  - Linus Läubli
+date: 2026-03-23
+modified: 2026-03-23
+tags:
+  - attack.persistence
+  - attack.t1176
+  - falcon.T1176-WIN-001
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: low
+  kusto: |
+    let KnownExtensions = externaldata(ExtensionId: string, ExtensionName: string)
+    [ 
+       h@'https://raw.githubusercontent.com/DebugBear/chrome-extension-list/refs/heads/master/extensions-2024.json'
+    ]
+    with(format='multijson', ingestionMapping='[{"Column":"ExtensionId","Properties":{"Path":"$.id"}},{"Column":"ExtensionName","Properties":{"Path":"$.name"}}]');
+    DeviceFileEvents
+    | where (InitiatingProcessFileName contains "chrome" or InitiatingProcessFileName contains "edge" or InitiatingProcessFileName contains "brave" or InitiatingProcessFileName contains "vivaldi")  and (FolderPath contains "User Data\\Default\\Extensions" or FolderPath endswith ".crx") and FolderPath notcontains "Temp"
+    | extend ExtensionId = extract("([a-z]{32})", 1, FolderPath)
+    | summarize installation_count = count_distinct(DeviceId), devices = make_set(DeviceName) by ExtensionId
+    | join kind = leftouter KnownExtensions on ExtensionId
+    | project ExtensionName, ExtensionId, devices, installation_count
+    | order by installation_count desc
+  falsepositives:
+    - N/A
+level: medium
