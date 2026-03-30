@@ -19,16 +19,18 @@ logsource:
 detection:
   load: low
   kusto: |
-    let KnownExtensions = externaldata(ExtensionId: string, ExtensionName: string)
-    [ 
-       h@'https://raw.githubusercontent.com/DebugBear/chrome-extension-list/refs/heads/master/extensions-2024.json'
+    let KnownExtensions = externaldata(ExtensionId:string, ExtensionName:string)
+    [
+      h@"https://raw.githubusercontent.com/WildDogOne/chrome-extension-list/refs/heads/main/chrome_extensions.csv"
     ]
-    with(format='multijson', ingestionMapping='[{"Column":"ExtensionId","Properties":{"Path":"$.id"}},{"Column":"ExtensionName","Properties":{"Path":"$.name"}}]');
+    with(format="csv");
     DeviceFileEvents
     | where (InitiatingProcessFileName contains "chrome" or InitiatingProcessFileName contains "edge" or InitiatingProcessFileName contains "brave" or InitiatingProcessFileName contains "vivaldi")  and (FolderPath contains "User Data\\Default\\Extensions" or FolderPath endswith ".crx") and FolderPath notcontains "Temp"
     | extend ExtensionId = extract("([a-z]{32})", 1, FolderPath)
+    | where isnotempty(ExtensionId)
     | summarize installation_count = count_distinct(DeviceId), devices = make_set(DeviceName) by ExtensionId
     | join kind = leftouter KnownExtensions on ExtensionId
+    | where isnotempty(ExtensionName) // Can be removed to have a broader idea of all apps
     | project ExtensionName, ExtensionId, devices, installation_count
     | order by installation_count desc
   falsepositives:
