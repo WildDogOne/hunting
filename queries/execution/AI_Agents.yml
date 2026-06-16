@@ -1,0 +1,56 @@
+title: AI Agent Detection
+id: 96ff7a75-4ec2-48b8-ae37-a4123d9f4dd1
+status: test
+description: |
+  Detects AI Agents that run other processes on the system.
+  AI Agents can be used for various purposes, such as botnets, malware, and other malicious activities.
+references:
+  - https://github.com/elastic/detection-rules/blob/f8fdc29f73df76b58038695769547cbd002dbcc0/rules_building_block/execution_mcp_server_child_process.toml#L26
+author:
+  - Linus
+date: 2026-06-16
+modified: 2026-06-16
+tags:
+  - attack.execution
+  - attack.t1204
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: low
+  kusto: |
+    let gen_ai_execs = dynamic(["Cursor", "Cursor.exe", "cursor", "vibe", "vibe.exe",
+        "Cursor Helper", "Cursor Helper (Plugin)", "Cursor Helper (GPU)", "Cursor Helper (Renderer)",
+        "Claude", "Claude.exe", "claude",
+        "Claude Helper", "Claude Helper (Plugin)", "Claude Helper (GPU)", "Claude Helper (Renderer)",
+        "Windsurf", "Windsurf.exe", "windsurf",
+        "Windsurf Helper", "Windsurf Helper (Plugin)", "Windsurf Helper (GPU)", "Windsurf Helper (Renderer)",
+        "Code", "Code.exe", "code",
+        "Code Helper", "Code Helper (Plugin)", "Code Helper (GPU)", "Code Helper (Renderer)",
+        "codex", "codex.exe",
+        "Copilot", "Copilot.exe", "copilot",
+        "Jan", "Jan.exe", "jan",
+        "Jan Helper", "Jan Helper (Plugin)", "Jan Helper (GPU)", "Jan Helper (Renderer)",
+        "LM Studio", "LM Studio.exe", "lmstudio",
+        "Ollama", "Ollama.exe", "ollama",
+        "GPT4All", "gpt4all", "gpt4all.exe",
+        "textgen.exe", "textgen", "text-generation-webui.exe", "oobabooga.exe",
+        "gemini-cli.exe", "gemini-cli",
+        "genaiscript.exe", "genaiscript",
+        "grok.exe", "grok",
+        "qwen.exe", "qwen",
+        "koboldcpp.exe", "koboldcpp", "KoboldCpp",
+        "llama-server", "llama-cli",
+        "OpenClaw", "openclaw", "openclaw.exe",
+        "Moltbot", "moltbot", "moltbot.exe",
+        "Clawdbot", "clawdbot", "clawdbot.exe"]);
+    DeviceProcessEvents
+    | where Timestamp > ago(1d)
+    | where InitiatingProcessFileName in~ (gen_ai_execs)
+    | where InitiatingProcessFileName !~ FileName
+    | where not(FileName has_any (gen_ai_execs))
+    | summarize count(), make_set(ProcessCommandLine) by InitiatingProcessFileName, FileName//, SHA1
+    | where not(FileName in ("Update.exe"))
+    | sort by count_ desc
+falsepositives:
+  - Legitimate AI Agents, but what is legit?
+level: low
