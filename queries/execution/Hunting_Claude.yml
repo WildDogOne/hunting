@@ -24,6 +24,7 @@ detection:
     | where not( FileName in~ ("Claude Helper (Plugin)", "WINWORD.EXE", "Update.exe", "POWERPNT.EXE", "EXCEL.EXE", "Claude Helper", "Claude Helper (Renderer)"))
     | where not( ProcessCommandLine contains ".claude/shell-snapshots")
     | where not( ProcessCommandLine contains "claude")
+    | where not(ProcessCommandLine in ("ssh -G ccd-identityagent-probe", "/usr/bin/sw_vers") )
     //| summarize make_set(ProcessCommandLine) by InitiatingProcessFileName, FileName
     | summarize distinct_cli = count_distinct(ProcessCommandLine), distinct_application = count_distinct(FileName), make_set(ProcessCommandLine) by DeviceName//, bin(Timestamp, 1h)
     | sort by distinct_application desc
