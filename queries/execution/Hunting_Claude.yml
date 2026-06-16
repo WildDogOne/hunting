@@ -27,8 +27,7 @@ detection:
     | where not(ProcessCommandLine in ("ssh -G ccd-identityagent-probe", "/usr/bin/sw_vers") )
     | where not( (FileName == "chrome.exe" or FileName == "msedge.exe") and ProcessCommandLine contains "--single-argument")
     | where not( (FileName == "firefox.exe" ) and ProcessCommandLine contains "-url" and ProcessCommandLine contains "-osint")
-    //| summarize make_set(ProcessCommandLine) by InitiatingProcessFileName, FileName
-    | summarize distinct_cli = count_distinct(ProcessCommandLine), distinct_application = count_distinct(FileName), make_set(ProcessCommandLine) by DeviceName//, bin(Timestamp, 1h)
+    | summarize distinct_cli = count_distinct(ProcessCommandLine), distinct_application = count_distinct(FileName), make_set(FileName), make_set(ProcessCommandLine) by DeviceName//, bin(Timestamp, 1h)
     | sort by distinct_application desc
 falsepositives:
   - Legitimate AI Agents, but what is legit?
