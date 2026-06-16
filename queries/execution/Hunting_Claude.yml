@@ -1,0 +1,32 @@
+title: Hunting for Claude
+id: f4cccae8-dc97-4d72-a4dc-c7a57695c0df
+status: test
+description: |
+  Hunting for Processes executed by claude which could indicate the usage of Claude Cowork
+references:
+  - https://github.com/elastic/detection-rules/blob/f8fdc29f73df76b58038695769547cbd002dbcc0/rules_building_block/execution_mcp_server_child_process.toml#L26
+author:
+  - Linus
+date: 2026-06-16
+modified: 2026-06-16
+tags:
+  - attack.execution
+  - attack.t1204
+logsource:
+  product: microsoft defender for endpoint
+detection:
+  load: low
+  kusto: |
+    DeviceProcessEvents
+    | where Timestamp > ago(2d)
+    | where InitiatingProcessFileName in~ ("claude", "claude.exe")
+    | where InitiatingProcessFileName !~ FileName
+    | where not( FileName in~ ("Claude Helper (Plugin)", "WINWORD.EXE", "Update.exe", "POWERPNT.EXE", "EXCEL.EXE", "Claude Helper", "Claude Helper (Renderer)"))
+    | where not( ProcessCommandLine contains ".claude/shell-snapshots")
+    | where not( ProcessCommandLine contains "claude")
+    //| summarize make_set(ProcessCommandLine) by InitiatingProcessFileName, FileName
+    | summarize distinct_cli = count_distinct(ProcessCommandLine), distinct_application = count_distinct(FileName), make_set(ProcessCommandLine) by DeviceName//, bin(Timestamp, 1h)
+    | sort by distinct_application desc
+falsepositives:
+  - Legitimate AI Agents, but what is legit?
+level: low
