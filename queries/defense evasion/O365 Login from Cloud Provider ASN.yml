@@ -1,0 +1,66 @@
+title: O365 Login from Cloud Provider ASN
+id: 423982dc-cf24-45d3-b2cf-c2b38f77a97b
+status: test
+description: |
+  Users typically authenticate to Office 365 / Entra ID from a small set of domestic networks
+  (corporate NAT, residential providers, corporate links). Successful logins that originate from
+  cloud provider / hosting / VPN networks (AWS, Azure, GCP, OVH, Cloudflare, Proton, ...) are therefore
+  anomalous and a strong indicator for credential reuse after phishing - the attacker works from a cloud VM
+  and usually shows no failed logins first, because the credentials were handed over.
+  XDR implementation notes (IdentityLogonEvents):
+  - there is no ASN field; match the ISP string instead,
+  - IdentityLogonEvents has no OWA "UserLoggedIn" event; the completed-session signal is LogonType
+    "OAuth2:Authorize" (attacker logins from a cloud VM appear as OAuth2:Authorize/LogonSuccess),
+  - if your own apps are fronted by Cloudflare/AWS, cloud ISP alone is noisy; filtering to cloud logins
+    from outside the home country with completed-session LogonTypes (OAuth2:Authorize/Token,
+    Login:*, Saml2, Cmsi), a non-empty AccountUpn, and accounts ending in @{{domain}} keeps the result set small.
+  To answer "is this normal for THIS user", each hit (user+country) is baselined against that user's
+  successful session logons from the same country in the preceding 90 days: PastLogins=0 / NewCountryForUser=true
+  floats the real candidates to the top (real attacker logins rank first with past=0).
+  MDI's native UncommonForUser annotation (contains "ISP"/"CountryCode") flags about half of these hits
+  and can be used as corroboration: where UncommonForUser has_any ("ISP", "CountryCode").
+references:
+  - https://attack.mitre.org/techniques/T1078/004/
+author:
+  - Linus
+date: 2026-11-10
+modified: 2026-11-10
+tags:
+  - attack.defense_evasion
+  - attack.t1078.004
+logsource:
+  product: microsoft defender for identity
+detection:
+  load: low
+  kusto: |
+    let timeframe = 7d;
+    let lookback = 90d; // per-user baseline window
+    let homeCountry = "{{home_country}}"; // ISO 2-letter code, e.g. used in the Location field
+    let cloudIsp = dynamic(["amazon", "azure", "google", "ovh", "hetzner", "digitalocean", "cloudflare", "fastly", "akamai", "oracle", "alibaba", "proton"]);
+    let sessionTypes = dynamic(["OAuth2:Authorize", "OAuth2:Token", "Login:login", "Login:reprocess", "Login:resume", "Saml2:processrequest", "Cmsi:Cmsi"]); // completed-session signals only
+    let hits =
+    IdentityLogonEvents
+    | where Timestamp >= ago(timeframe) and ActionType == "LogonSuccess"
+    | where ISP has_any (cloudIsp)
+    | where Location != homeCountry // Location uses 2-letter codes; drop for the (much noisier) domestic cloud view
+    | where isnotempty(AccountUpn) and LogonType in (sessionTypes) // drops pre-user SAS:BeginAuth/EndAuth events from SSO pages fronted by cloud proxies
+    | where AccountUpn endswith "@{{domain}}" // staff/guest accounts only; students and external guests are out of scope for this hunt
+    | summarize Logons = count(), Isps = make_set(ISP, 5), Types = make_set(LogonType, 5),
+        FirstSeen = min(Timestamp), LastSeen = max(Timestamp) by AccountUpn, Location;
+    let history =
+    IdentityLogonEvents
+    | where Timestamp >= ago(lookback) and Timestamp < ago(timeframe) and ActionType == "LogonSuccess"
+    | where isnotempty(AccountUpn) and LogonType in (sessionTypes) // same event scope as hits, so PastLogins is comparable
+    | where AccountUpn endswith "@{{domain}}" // same scope as hits
+    | summarize PastLogins = count() by AccountUpn, PastCountry = Location;
+    hits
+    | join kind=leftouter (history) on AccountUpn, $left.Location == $right.PastCountry
+    | extend PastLogins = iif(isnull(PastLogins), 0, PastLogins) // separate extend: within one extend, the second expression sees the OLD PastLogins
+    | extend NewCountryForUser = PastLogins == 0
+    | project-away PastCountry, AccountUpn1
+    | sort by NewCountryForUser desc, Logons desc
+falsepositives:
+  - Traveling users on hotel/VPN cloud egress (NewCountryForUser=true but single logon, consistent with a trip) - check the account's calendar/travel pattern
+  - Apps fronted by Cloudflare/AWS typically terminate in the home country and are already filtered out by the Location line
+  - Students and external guests are excluded by the @{{domain}} filter - drop that line when a student or guest mailbox is suspected (the WHfB/Cmsi rule still covers students)
+level: medium

@@ -1,0 +1,85 @@
+title: WHfB Device Registration Attack (Cmsi Anomaly)
+id: 1503ff23-04d7-4bb0-8784-e6c00680e81d
+status: test
+description: |
+  In a device registration attack, a phished user is walked through registering the attacker's
+  device and a Windows Hello for Business (WHfB) credential ("air mass registration").
+  The Entra audit events "Register Device" / "Add Windows Hello for Business credential" do NOT show up
+  in XDR IdentityDirectoryEvents; the pivot in XDR is IdentityLogonEvents with LogonType "Cmsi:Cmsi"
+  (Certificate Registration Service, which issues the WHfB key).
+  Naive variants are too noisy: many users have at least one Cmsi success per 30d, and nearly all users
+  have some failed auth events, so "volume OR failures" returns thousands of rows.
+  Measure your own per-user Cmsi-success distribution first and tune the baseline threshold to it.
+  This rule therefore scores each user: Cmsi volume above baseline (+2), Cmsi success from a foreign
+  country (+2), successful login from outside the home country within 7 days AFTER the Cmsi success (+2), failed auth-broker
+  flows in the same hour as the Cmsi success (+1), and cloud/VPN ISP on the follow-on foreign logins (+2).
+  The follow-on arm is what catches the stealthy variant: an attack can register its WHfB key from the
+  victim's own home IP (invisible to geo-IP rules) and then log in with it days later from a cloud VM abroad -> high score.
+  Row counts depend on the environment; triage from the top of the RiskScore sort.
+  Users with many Cmsi FAILURES (e.g. spray against accounts that then lock) are deliberately out of scope:
+  no key was issued, so no registration succeeded - hunt those via the password-spraying rules instead.
+  Follow up hits via Graph /auditLogs/directoryAudits (targetResources/id eq <user object id>) for the
+  registered device name and the searchableDeviceKey diff.
+references:
+  - https://attack.mitre.org/techniques/T1556/006/
+  - https://attack.mitre.org/techniques/T1078/004/
+author:
+  - Linus
+date: 2026-11-10
+modified: 2026-11-10
+tags:
+  - attack.credential_access
+  - attack.t1556.006
+  - attack.t1078.004
+logsource:
+  product: microsoft defender for identity
+detection:
+  load: low
+  kusto: |
+    let timeframe = 30d;
+    let baseline = 25; // tune to your tenant's per-user 30d Cmsi-success distribution
+    let homeCountry = "{{home_country}}"; // ISO 2-letter code, e.g. used in the Location field
+    let cloudIsp = dynamic(["amazon", "microsoft azure", "azure", "google", "aws", "vpn", "latitude", "cloudflare", "digitalocean", "hetzner", "ovh", "proton"]);
+    let cmsiSucc =
+    IdentityLogonEvents
+    | where Timestamp >= ago(timeframe)
+    | where LogonType == "Cmsi:Cmsi" and ActionType == "LogonSuccess";
+    let failedFlows =
+    IdentityLogonEvents
+    | where Timestamp >= ago(timeframe)
+    | where LogonType in ("Login:login", "Login:reprocess", "SAS:ProcessAuth") and ActionType == "LogonFailed"
+    | extend hb = bin(Timestamp, 1h)
+    | summarize FailedAuth = count() by AccountUpn, hb;
+    let perUser =
+    cmsiSucc
+    | summarize CmsiLogons = count(), ForeignCmsi = countif(isnotempty(Location) and Location != homeCountry),
+        CmsiLocs = make_set(Location, 5), Isps = make_set(ISP, 10), Ips = make_set(IPAddress, 10),
+        FirstSeen = min(Timestamp), LastSeen = max(Timestamp) by AccountUpn;
+    let coupled =
+    cmsiSucc
+    | extend hb = bin(Timestamp, 1h)
+    | join kind=inner (failedFlows | where FailedAuth >= 2) on AccountUpn, hb
+    | summarize CoupledHours = count() by AccountUpn;
+    let cmsiFirst = cmsiSucc | summarize CmsiFirst = min(Timestamp) by AccountUpn;
+    let foreignAfter =
+    IdentityLogonEvents
+    | where Timestamp >= ago(timeframe) and ActionType == "LogonSuccess"
+    | where isnotempty(Location) and Location != homeCountry // Location uses 2-letter country codes
+    | join kind=inner (cmsiFirst) on AccountUpn
+    | where Timestamp > CmsiFirst and Timestamp < CmsiFirst + 7d
+    | summarize ForeignLoginsAfter = count(), ForeignLocs = make_set(Location, 5), ForeignIsps = make_set(ISP, 8) by AccountUpn;
+    perUser
+    | join kind=leftouter (coupled) on AccountUpn
+    | join kind=leftouter (foreignAfter) on AccountUpn
+    | where CmsiLogons > baseline or ForeignCmsi > 0 or ForeignLoginsAfter > 0
+    | extend CloudFollowOn = ForeignIsps has_any (cloudIsp)
+    | extend RiskScore = iff(CmsiLogons > baseline, 2, 0) + iff(ForeignCmsi > 0, 2, 0) + iff(ForeignLoginsAfter > 0, 2, 0) + iff(CoupledHours > 0, 1, 0) + iff(CloudFollowOn, 2, 0)
+    | project-reorder AccountUpn, RiskScore, CmsiLogons, ForeignCmsi, ForeignLoginsAfter, CoupledHours, CloudFollowOn, CmsiLocs, ForeignLocs, Isps, ForeignIsps, FirstSeen, LastSeen
+    | sort by RiskScore desc, CmsiLogons desc
+    // Triage from the top; to cut further, drop the follow-on arm for neighbour countries:
+    // | where ForeignLoginsAfter == 0 or ForeignLocs !has_any (dynamic(["DE", "AT", "FR", "IT"]))
+falsepositives:
+  - Cross-border commuters who re-enroll WHfB while traveling - they dominate the mid-score band
+  - Users with commercial VPNs (Cmsi or follow-on logins via Cloudflare/VPN exit nodes)
+  - Legitimate WHfB re-enrollment after a password reset or new device (repeated Cmsi from known domestic IPs)
+level: high

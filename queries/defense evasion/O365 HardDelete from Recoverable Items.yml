@@ -1,0 +1,50 @@
+title: O365 HardDelete from Recoverable Items
+id: 87eb8595-b4ec-4658-b6df-269cde8fa4a8
+status: test
+description: |
+  HardDelete events whose target folder is under \Recoverable Items\ mean items were purged past
+  the dumpster - anti-forensics / evidence destruction after a mailbox compromise.
+  In a real-world attack the purge was the last step of the intrusion: bulk MoveToDeletedItems and
+  SoftDelete first, then the hard purge out of \Recoverable Items\Deletions, destroying legitimate business mail too.
+  XDR implementation notes (CloudAppEvents, fed by the Defender for Cloud Apps Exchange connector):
+  - the dumpster folder appears in ActivityObjects as an "Email folder" target object,
+  - AccountId is the AAD object id; the mailbox UPN is in RawEventData.UserId,
+  - RawEventData.AffectedItems carries the actual purged items, so ItemsPurged counts items, not events,
+  - CloudAppEvents retention is limited for this connector data - keep the timeframe within it.
+  Low volume: the Foreign/Admin/Proxy flags float attacker rows to the top
+  (in a real case the compromised mailbox ranked first: hard purge from a foreign cloud IP).
+references:
+  - https://attack.mitre.org/techniques/T1070/
+  - https://attack.mitre.org/techniques/T1485/
+author:
+  - Linus
+date: 2026-11-10
+modified: 2026-11-10
+tags:
+  - attack.defense_evasion
+  - attack.t1070.004
+  - attack.impact
+  - attack.t1485
+logsource:
+  product: microsoft defender for cloud apps
+detection:
+  load: low
+  kusto: |
+    let timeframe = 30d; // keep within CloudAppEvents retention
+    let homeCountry = "{{home_country}}"; // ISO 2-letter code, e.g. used in the CountryCode field
+    CloudAppEvents
+    | where Timestamp >= ago(timeframe)
+    | where ActionType == "HardDelete"
+    | where ActivityObjects has "Recoverable Items" // dumpster purge, folder is an "Email folder" target object
+    | extend AccountUpn = tostring(RawEventData.UserId) // AccountId is the AAD object id, not the UPN
+    | extend ItemsPurged = array_length(RawEventData.AffectedItems)
+    | summarize HardDeleteEvents = count(), ItemsPurged = sum(ItemsPurged), FirstSeen = min(Timestamp), LastSeen = max(Timestamp),
+        Ips = make_set(IPAddress, 5), Countries = make_set(CountryCode, 3),
+        Foreign = countif(CountryCode != homeCountry) > 0, Admin = countif(IsAdminOperation) > 0, Proxy = countif(IsAnonymousProxy) > 0
+      by AccountUpn
+    | sort by Foreign desc, ItemsPurged desc
+falsepositives:
+  - Users legitimately emptying their dumpster (high ItemsPurged but domestic IPs, e.g. 700+ events in minutes) - review the Foreign flag first
+  - Retention policy processing and Mailbox Assistant (system/service actors)
+  - eDiscovery/compliance purges - cross-check Admin and the acting account
+level: high

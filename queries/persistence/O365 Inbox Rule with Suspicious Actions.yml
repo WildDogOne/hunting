@@ -1,0 +1,76 @@
+title: O365 Inbox Rule with Suspicious Actions
+id: 3706a243-bb07-4ff5-bf68-e99eabc6dfcc
+status: test
+description: |
+  Attackers who have access to a mailbox frequently create inbox rules to hide their activity or
+  exfiltrate mail: incoming mail is marked as read and moved out of the inbox (often into a rarely used
+  folder), forwarded/redirected to another address, and StopProcessingRules=True silently disables every
+  downstream rule (including legitimate filtering/alerting rules).
+  Vendor rules typically only cover auto-forwarding rules - this hunt also targets the non-forwarding variants.
+  Naively flagging every rule that has any of these parameters is too noisy (hundreds of rows/30d):
+  StopProcessingRules and MoveToFolder are common checkboxes in legitimate filing rules. What separates an
+  attacker rule is (a) no condition at all - it applies to EVERY incoming message - and (b) rare actions:
+  MarkAsRead, DeleteMessage, punctuation-only rule names. This rule triggers on
+  junk name OR MarkAsRead OR DeleteMessage OR forwarding OR (unconditional AND move/stop-processing),
+  and ranks by a Priority score (junk_name 3, MarkAsRead/DeleteMessage/forwarding/unconditional 2,
+  stop/move 1). In one tenant this cut ~300 rows/30d to ~35; the top of the list is also a useful
+  data-leakage report (unconditional/external forwarding).
+  XDR implementation notes (CloudAppEvents, fed by the Defender for Cloud Apps Exchange connector):
+  - the rule parameters are a JSON array of {Name, Value} strings in RawEventData.Parameters;
+    the query pivots them back into columns (maxif),
+  - AccountId is the AAD object id; the mailbox UPN is in RawEventData.UserId,
+  - RawEventData.ObjectId carries the rule identity (mailbox\ruleid),
+  - Remove-InboxRule events are excluded (usually containment, not attack) but can be
+    added to the action list to track takedowns,
+  - no geo whitelisting: the action set is the signal, IPAddress/CountryCode stay as triage columns.
+references:
+  - https://attack.mitre.org/techniques/T1137/003/
+  - https://attack.mitre.org/techniques/T1564/008/
+author:
+  - Linus
+date: 2026-11-10
+modified: 2026-11-10
+tags:
+  - attack.persistence
+  - attack.t1137.003
+  - attack.defense_evasion
+  - attack.t1564.008
+logsource:
+  product: microsoft defender for cloud apps
+detection:
+  load: low
+  kusto: |
+    let timeframe = 30d;
+    CloudAppEvents
+    | where Timestamp >= ago(timeframe)
+    | where ActionType in ("New-InboxRule", "Set-InboxRule")
+    | extend AccountUpn = tostring(RawEventData.UserId) // AccountId is the AAD object id, not the UPN
+    | where AccountUpn endswith "@{{domain}}" or AccountUpn endswith ".onmicrosoft.com"
+    | extend EventId = tostring(RawEventData.Id), RuleObjectId = tostring(RawEventData.ObjectId)
+    // Rule parameters arrive as a JSON array of {Name, Value} strings; pivot them into columns
+    | mv-expand PC = RawEventData.Parameters
+    | extend PJ = parse_json(tostring(PC))
+    | summarize RuleName = maxif(tostring(PJ.Value), tostring(PJ.Name) == "Name"),
+        MoveToFolder = maxif(tostring(PJ.Value), tostring(PJ.Name) == "MoveToFolder"),
+        ForwardTo = maxif(tostring(PJ.Value), tostring(PJ.Name) == "ForwardTo"),
+        RedirectTo = maxif(tostring(PJ.Value), tostring(PJ.Name) == "RedirectTo"),
+        StopProcessing = maxif(tostring(PJ.Value), tostring(PJ.Name) == "StopProcessingRules"),
+        MarkAsRead = maxif(tostring(PJ.Value), tostring(PJ.Name) == "MarkAsRead"),
+        DeleteMessage = maxif(tostring(PJ.Value), tostring(PJ.Name) == "DeleteMessage"),
+        hasCondition = maxif(1, tostring(PJ.Name) in ("From","SubjectContainsWords","SubjectOrBodyContainsWords","SentTo","FromAddressContainsWords","BodyContainsWords","IsMentioned","MyNameInToBox","MyNameInCcBox","HeaderContainsWords"))
+      by EventId, AccountUpn, ActionType, Timestamp, IPAddress, CountryCode, RuleObjectId
+    | extend stop_rules = StopProcessing == "True", mark_read = MarkAsRead == "True",
+        moved = isnotempty(MoveToFolder), forwarded = isnotempty(ForwardTo) or isnotempty(RedirectTo),
+        deletes = DeleteMessage == "True",
+        junk_name = not (RuleName matches regex ".*[a-zA-Z].*"), cond = hasCondition == 1
+    // Legitimate filing rules commonly combine MoveToFolder/StopProcessingRules WITH a condition;
+    // attacker rules are unconditional (apply to everything) or use the rare actions MarkAsRead/DeleteMessage
+    | where junk_name or mark_read or deletes or forwarded or (cond == 0 and (moved or stop_rules))
+    | extend Priority = iff(junk_name, 3, 0) + iff(mark_read, 2, 0) + iff(deletes, 2, 0) + iff(forwarded, 2, 0) + iff(cond == 0, 2, 0) + iff(stop_rules, 1, 0) + iff(moved, 1, 0)
+    | sort by Priority desc, Timestamp desc
+falsepositives:
+  - Users forwarding to private/other employer addresses (policy finding, not compromise - but still leakage)
+  - Users' own auto-delete/cleanup rules (DeleteMessage with a condition, sensible rule name)
+  - Service/shared mailboxes whose own automation churns Set-InboxRule with StopProcessingRules/ForwardTo
+  - Admin or migration tooling creating rules (check AccountUpn and IPAddress against known service accounts)
+level: medium
