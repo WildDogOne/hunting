@@ -164,3 +164,4 @@ cython_debug/
 config.py
 hunting_statistics.json
 elastic-detection-rules/
+AGENTS.md
